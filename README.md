@@ -9,7 +9,7 @@ Prosjektet består av tre deler:
 | Del | Teknologi | Hva den gjør |
 |---|---|---|
 | [Webapp](src/) | React 19, Vite, Tailwind, Firebase | Budsjett, transaksjoner, avstemming, prosjekter, innsikt |
-| [Companion-app](companion_app/) | Android (Kotlin, Jetpack Compose) | Kvitteringsfangst: deler kvittering inn i appen, Claude tolker varelinjene, geofence-varsel etter butikkbesøk |
+| [Companion-app](companion_app/) | Android (Kotlin, Jetpack Compose) | Sanntidslogging: fanger opp Google Wallet-betalinger i det de skjer, kvitteringstolkning med Claude, geofence-varsel etter butikkbesøk |
 | [sb1-sync](sb1-sync/) | Node.js, Docker | Henter transaksjoner automatisk fra SpareBank 1 sitt API (OAuth/BankID) og lander dem i Firestore |
 
 ## Funksjoner
@@ -20,6 +20,9 @@ Prosjektet består av tre deler:
   SpareBank 1-API, med duplikatdeteksjon og sammenslåing
 - **Avstemming** – transaksjoner kobles mot budsjettposter måned for måned;
   en avstemt måned er fasit
+- **Sanntidslogging via Google Wallet** – companion-appen lytter på
+  betalingsvarsler fra telefonen og lar kjøpet logges og avstemmes i samme
+  øyeblikk som du drar kortet, med butikk, beløp og kort ferdig utfylt
 - **Kvitteringer på varelinjenivå** – companion-appen tolker kvitteringer med
   Claude og matcher dem automatisk mot transaksjoner på beløp + dato
 - **Matvareinnsikt** – varelinjer kategoriseres og aggregeres per kjede
