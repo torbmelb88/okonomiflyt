@@ -1,5 +1,8 @@
 # ØkonomiFlyt
 
+**▶ [Prøv demoen](https://torbmelb88.github.io/okonomiflyt/)** — kjører helt i
+nettleseren med syntetiske demodata, ingen innlogging eller backend.
+
 Privatøkonomi-app for husholdninger med delt og personlig økonomi. Bygget for
 reell månedlig bruk: budsjettene avstemmes mot faktiske banktransaksjoner, og
 etter avstemming skal tallene være eksakte.
@@ -65,7 +68,11 @@ En eksempel-CSV for importfunksjonen ligger i [demo/](demo/).
 1. Opprett et Firebase-prosjekt med Firestore og Google-innlogging aktivert
 2. Kopier `.env.example` til `.env` og fyll inn web-konfigen fra
    Firebase Console
-3. `npm run dev`
+3. Kopier `firestore.rules.example` til `firestore.rules`, fyll inn dine egne
+   bruker-ID-er (Firebase Console → Authentication → Users) og deploy dem med
+   `firebase deploy --only firestore:rules` — reglene slipper kun kjente
+   UID-er inn i databasen
+4. `npm run dev`
 
 Demo-modus kan også tvinges på med `VITE_DEMO_MODE=true` i `.env`.
 

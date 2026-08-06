@@ -1,5 +1,9 @@
 rules_version = '2';
 
+// Kopier denne fila til firestore.rules og fyll inn dine egne bruker-ID-er
+// (Firebase Console -> Authentication -> Users). Deploy med:
+//   firebase deploy --only firestore:rules
+//
 // Kun kjente brukere slipper til: web-appens Google-bruker og
 // companion-appens dedikerte enhetskonto. sb1-sync bruker Admin SDK
 // (service account) og går utenom reglene.
@@ -8,8 +12,8 @@ service cloud.firestore {
     function isOwner() {
       return request.auth != null
         && request.auth.uid in [
-          '5u0d0iQJnmdzs8av8aLgoaxPtul2', // web (Google-innlogging)
-          'V3IW9zAL2EZgZatUdAtYDxIAriN2'  // companion-app (enhetskonto)
+          'DIN_WEB_BRUKER_UID',       // web (Google-innlogging)
+          'DIN_ENHETSKONTO_UID'       // companion-app (enhetskonto)
         ];
     }
 

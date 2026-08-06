@@ -26,6 +26,8 @@ GoogleService-Info.plist
 # Firebase deploy cache + personal project pointer
 .firebase/
 .firebaserc
+# Rules med ekte UID-er — se firestore.rules.example
+firestore.rules
 
 # Local Claude Code settings
 .claude/

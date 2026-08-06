@@ -48,7 +48,8 @@ function App() {
     <AuthProvider>
       <ThemeProvider>
         <BudgetProvider>
-          <BrowserRouter>
+          {/* basename følger Vites base-path (f.eks. /okonomiflyt/ på GitHub Pages) */}
+          <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
             <Routes>
               <Route path="/login" element={<Login />} />
 
