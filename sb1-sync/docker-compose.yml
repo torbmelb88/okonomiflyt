@@ -1,0 +1,16 @@
+services:
+  sb1-sync:
+    build: .
+    container_name: sb1-sync
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Daglig 06:00 norsk tid. Containeren blir værende og kjører på timeplan.
+      SB1_SCHEDULE: "0 6 * * *"
+      # Skriv til Firestore (mellomlagrings-collection). Krever at sa-key.json
+      # ligger i ./data-volumet.
+      SB1_SINK: "firestore"
+      GOOGLE_APPLICATION_CREDENTIALS: "/app/data/sa-key.json"
+      SB1_FIRESTORE_COLLECTION: "sb1Transactions"
+    volumes:
+      - ./data:/app/data
