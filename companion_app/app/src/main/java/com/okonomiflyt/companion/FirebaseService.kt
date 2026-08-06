@@ -1,6 +1,7 @@
 package com.okonomiflyt.companion
 
 import android.util.Log
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.okonomiflyt.companion.receipts.ParsedReceipt
 import com.okonomiflyt.companion.receipts.TransactionMatch
@@ -66,16 +67,28 @@ data class ReceiptSummary(
 
 class FirebaseService {
     private val db = FirebaseFirestore.getInstance()
+    private val auth = FirebaseAuth.getInstance()
     private val TAG = "FirebaseService"
-    
-    // Hardcoded User ID for now based on your feedback
-    private val userId = "user1" // Wait, I should find the real UID from web or just let it query by 'ownerId' or list all if it's just the user's project.
-    // If it's your personal project, you might just want to list all budgets where 'ownerId' is your UID, but we don't know your real UID.
-    // Let's just pull all budgets for now, since it's a private app just for you.
+
+    // Firestore security rules only allow known UIDs, so every access goes
+    // through this gate: sign in with the dedicated device account first.
+    private suspend fun firestore(): FirebaseFirestore {
+        if (auth.currentUser == null) {
+            try {
+                auth.signInWithEmailAndPassword(
+                    BuildConfig.COMPANION_AUTH_EMAIL,
+                    BuildConfig.COMPANION_AUTH_PASSWORD
+                ).await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Firebase sign-in failed — check COMPANION_AUTH_* in local.properties", e)
+            }
+        }
+        return db
+    }
 
     suspend fun getBudgets(): List<Budget> {
         return try {
-            val snapshot = db.collection("budgets").get().await()
+            val snapshot = firestore().collection("budgets").get().await()
             snapshot.documents.mapNotNull { doc ->
                 val name = doc.getString("name") ?: return@mapNotNull null
                 val type = doc.getString("type") ?: "personal"
@@ -89,7 +102,7 @@ class FirebaseService {
 
     suspend fun getAccounts(): List<Account> {
         return try {
-            val snapshot = db.collection("accounts").get().await()
+            val snapshot = firestore().collection("accounts").get().await()
             snapshot.documents.mapNotNull { doc ->
                 val name = doc.getString("name") ?: return@mapNotNull null
                 val cardLastFour = doc.getString("cardLastFour")
@@ -105,7 +118,7 @@ class FirebaseService {
 
     suspend fun getProjects(): List<Project> {
         return try {
-            val snapshot = db.collection("projects").get().await()
+            val snapshot = firestore().collection("projects").get().await()
             snapshot.documents.mapNotNull { doc ->
                 val name = doc.getString("name") ?: return@mapNotNull null
                 val description = doc.getString("description") ?: ""
@@ -123,7 +136,7 @@ class FirebaseService {
     /** Category id -> name, to resolve the category shown for each def. */
     private suspend fun getCategoriesMap(): Map<String, String> {
         return try {
-            db.collection("categories").get().await()
+            firestore().collection("categories").get().await()
                 .documents.associate { it.id to (it.getString("name") ?: "Annet") }
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching categories", e)
@@ -139,7 +152,7 @@ class FirebaseService {
     suspend fun getBudgetItems(budgetType: String): List<BudgetItem> {
         return try {
             val cats = getCategoriesMap()
-            db.collection("budgetItemDefs").get().await().documents.mapNotNull { doc ->
+            firestore().collection("budgetItemDefs").get().await().documents.mapNotNull { doc ->
                 val name = doc.getString("name") ?: return@mapNotNull null
                 val scope = doc.getString("scope") ?: "both"
                 val eligible = scope == "both" ||
@@ -159,7 +172,7 @@ class FirebaseService {
     suspend fun getMerchantPreference(merchant: String): MerchantPreference? {
         return try {
             val key = merchant.trim().lowercase()
-            val doc = db.collection("merchantPreferences").document(key).get().await()
+            val doc = firestore().collection("merchantPreferences").document(key).get().await()
             if (doc.exists()) {
                 MerchantPreference(
                     budgetId = doc.getString("budgetId") ?: return null,
@@ -189,7 +202,7 @@ class FirebaseService {
                 "accountId" to accountId,
                 "updatedAt" to java.util.Date()
             )
-            db.collection("merchantPreferences").document(key).set(data).await()
+            firestore().collection("merchantPreferences").document(key).set(data).await()
         } catch (e: Exception) {
             Log.e(TAG, "Error saving merchant preference", e)
         }
@@ -203,7 +216,7 @@ class FirebaseService {
     private suspend fun ensureInstanceForDef(def: BudgetItem, budgetId: String): String? {
         return try {
             // Single-field query (no composite index); filter budgetId client-side.
-            val existing = db.collection("expenses").whereEqualTo("defId", def.id).get().await()
+            val existing = firestore().collection("expenses").whereEqualTo("defId", def.id).get().await()
             val match = existing.documents.find { it.getString("budgetId") == budgetId }
             if (match != null) return match.id
             val data = hashMapOf(
@@ -216,7 +229,7 @@ class FirebaseService {
                 "frequency" to "monthly",
                 "createdAt" to java.util.Date()
             )
-            db.collection("expenses").add(data).await().id
+            firestore().collection("expenses").add(data).await().id
         } catch (e: Exception) {
             Log.e(TAG, "Error materializing budget item instance", e)
             null
@@ -248,7 +261,7 @@ class FirebaseService {
             var finalAccountId = accountId ?: ""
             if (finalAccountId.isEmpty()) {
                 try {
-                    val accountsSnapshot = db.collection("accounts").get().await()
+                    val accountsSnapshot = firestore().collection("accounts").get().await()
                     if (!accountsSnapshot.isEmpty) {
                         val matchingAccount = accountsSnapshot.documents.find {
                             val c = it.getString("cardLastFour")
@@ -292,7 +305,7 @@ class FirebaseService {
                 "createdAt" to java.util.Date()
             )
 
-            db.collection("transactions").add(transactionData).await()
+            firestore().collection("transactions").add(transactionData).await()
 
             // Remember choices for next time — store the DEF id so recall re-selects it.
             saveMerchantPreference(
@@ -329,7 +342,7 @@ class FirebaseService {
             val from = fmt.format(java.util.Date(parsed.time - daysWindow * dayMs))
             val to = fmt.format(java.util.Date(parsed.time + daysWindow * dayMs))
 
-            val snapshot = db.collection("transactions")
+            val snapshot = firestore().collection("transactions")
                 .whereGreaterThanOrEqualTo("date", from)
                 .whereLessThanOrEqualTo("date", to)
                 .get()
@@ -356,7 +369,7 @@ class FirebaseService {
 
     suspend fun getStoreLocations(): List<StoreLocation> {
         return try {
-            val snapshot = db.collection("storeLocations").get().await()
+            val snapshot = firestore().collection("storeLocations").get().await()
             snapshot.documents.mapNotNull { doc ->
                 StoreLocation(
                     id = doc.id,
@@ -378,7 +391,7 @@ class FirebaseService {
      */
     suspend fun saveStoreLocation(name: String, lat: Double, lng: Double, radiusMeters: Double = 250.0): Boolean {
         return try {
-            db.collection("storeLocations").document(name).set(hashMapOf(
+            firestore().collection("storeLocations").document(name).set(hashMapOf(
                 "name" to name,
                 "lat" to lat,
                 "lng" to lng,
@@ -400,7 +413,7 @@ class FirebaseService {
      */
     suspend fun getKnownVareNames(): Map<String, List<String>> {
         return try {
-            val doc = db.collection("meta").document("groceryVocabulary").get().await()
+            val doc = firestore().collection("meta").document("groceryVocabulary").get().await()
             val byChain = (doc.get("namesByChain") as? Map<*, *>)?.entries
                 ?.associate { (chain, names) ->
                     chain.toString() to
@@ -421,7 +434,7 @@ class FirebaseService {
     /** Most recently logged receipts (summary only), newest shopping date first. */
     suspend fun getRecentReceipts(limit: Long = 15): List<ReceiptSummary> {
         return try {
-            db.collection("receipts")
+            firestore().collection("receipts")
                 .orderBy("date", com.google.firebase.firestore.Query.Direction.DESCENDING)
                 .limit(limit)
                 .get()
@@ -446,7 +459,7 @@ class FirebaseService {
 
     suspend fun getParserLessons(): List<String> {
         return try {
-            val doc = db.collection("meta").document("parserLessons").get().await()
+            val doc = firestore().collection("meta").document("parserLessons").get().await()
             (doc.get("lessons") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching parser lessons", e)
@@ -456,7 +469,7 @@ class FirebaseService {
 
     suspend fun addParserLesson(lesson: String): Boolean {
         return try {
-            db.collection("meta").document("parserLessons").set(
+            firestore().collection("meta").document("parserLessons").set(
                 mapOf("lessons" to com.google.firebase.firestore.FieldValue.arrayUnion(lesson.trim())),
                 com.google.firebase.firestore.SetOptions.merge()
             ).await()
@@ -470,7 +483,7 @@ class FirebaseService {
     /** True if a receipt with the same date and total is already stored. */
     suspend fun receiptExists(date: String, total: Double): Boolean {
         return try {
-            val snapshot = db.collection("receipts")
+            val snapshot = firestore().collection("receipts")
                 .whereEqualTo("date", date)
                 .whereEqualTo("total", total)
                 .get()
@@ -493,8 +506,8 @@ class FirebaseService {
         budgetId: String?
     ): Boolean {
         return try {
-            val batch = db.batch()
-            val receiptRef = db.collection("receipts").document()
+            val batch = firestore().batch()
+            val receiptRef = firestore().collection("receipts").document()
 
             batch.set(receiptRef, hashMapOf(
                 "store" to receipt.store,
@@ -513,7 +526,7 @@ class FirebaseService {
             ))
 
             receipt.items.forEach { item ->
-                val itemRef = db.collection("receiptItems").document()
+                val itemRef = firestore().collection("receiptItems").document()
                 batch.set(itemRef, hashMapOf(
                     "receiptId" to receiptRef.id,
                     "name" to item.name,
@@ -533,7 +546,7 @@ class FirebaseService {
 
             if (transactionId != null) {
                 batch.update(
-                    db.collection("transactions").document(transactionId),
+                    firestore().collection("transactions").document(transactionId),
                     "receiptId", receiptRef.id
                 )
             }
@@ -548,7 +561,7 @@ class FirebaseService {
                     .distinct()
                 if (newNames.isNotEmpty()) {
                     val group = com.okonomiflyt.companion.receipts.chainGroup(receipt.chain)
-                    db.collection("meta").document("groceryVocabulary").set(
+                    firestore().collection("meta").document("groceryVocabulary").set(
                         mapOf("namesByChain" to mapOf(
                             group to com.google.firebase.firestore.FieldValue.arrayUnion(*newNames.toTypedArray())
                         )),

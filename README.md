@@ -26,6 +26,24 @@ Prosjektet består av tre deler:
 - **Prosjekter** – øremerkede utgifter (oppussing, ferie) på tvers av budsjetter
 - **Refusjoner og utlegg** – retur/utlegg håndteres eksplisitt i oppgjøret
 
+## Skjermbilder (demo-modus)
+
+**Min Oversikt** – hva som må overføres hvor etter forrige måneds forbruk:
+
+![Min Oversikt](docs/screenshots/min-oversikt.png)
+
+**Oppgjør** – inntektsvektet fordeling av fellesutgifter, med utlegg trukket fra:
+
+![Oppgjør](docs/screenshots/oppgjor.png)
+
+**Dagligvarer** – varelinjer fra kvitteringer, kategorisert og med prishistorikk per vare:
+
+![Dagligvarer](docs/screenshots/dagligvarer.png)
+
+**Budsjett** – planlagte poster per måned:
+
+![Budsjett](docs/screenshots/budsjett.png)
+
 ## Kom i gang
 
 ```bash
@@ -51,8 +69,11 @@ Demo-modus kan også tvinges på med `VITE_DEMO_MODE=true` i `.env`.
 ### Companion-app og sb1-sync
 
 Android-appen bygges i Android Studio og trenger din egen
-`google-services.json` (genereres av Firebase Console) samt en
-`ANTHROPIC_API_KEY` i `local.properties` for kvitteringstolkningen.
+`google-services.json` (genereres av Firebase Console) samt tre verdier i
+`local.properties`: `ANTHROPIC_API_KEY` for kvitteringstolkningen og
+`COMPANION_AUTH_EMAIL`/`COMPANION_AUTH_PASSWORD` for en dedikert
+Firebase-enhetskonto (Firestore-reglene i [firestore.rules](firestore.rules)
+slipper kun kjente bruker-ID-er til).
 Synk-tjenesten er dokumentert i [sb1-sync/README.md](sb1-sync/README.md).
 
 ## Arkitektur i korte trekk

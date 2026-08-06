@@ -45,6 +45,19 @@ android {
             "ANTHROPIC_API_KEY",
             "\"${localProperties.getProperty("ANTHROPIC_API_KEY") ?: ""}\""
         )
+
+        // Dedicated Firebase device account (Firestore rules only allow known
+        // UIDs). Same pattern as the API key: values live in local.properties.
+        buildConfigField(
+            "String",
+            "COMPANION_AUTH_EMAIL",
+            "\"${localProperties.getProperty("COMPANION_AUTH_EMAIL") ?: ""}\""
+        )
+        buildConfigField(
+            "String",
+            "COMPANION_AUTH_PASSWORD",
+            "\"${localProperties.getProperty("COMPANION_AUTH_PASSWORD") ?: ""}\""
+        )
     }
 
     buildTypes {
