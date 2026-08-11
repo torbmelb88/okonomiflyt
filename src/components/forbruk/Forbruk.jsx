@@ -1,20 +1,21 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useBudget } from '../../contexts/BudgetContext';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Users, DollarSign, AlertTriangle, CheckCircle2, Download } from 'lucide-react';
 import clsx from 'clsx';
 import TransactionsPanel from '../transactions/TransactionsPanel';
-import ImportTransactionsModal from './ImportTransactionsModal';
 import BudgetItemDetailsModal from '../budget/BudgetItemDetailsModal';
 
 /**
- * Forbruk = the "past": actual spending. It owns the transaction list (bank
- * accounts) plus the budget-vs-actual comparison and the shared split that
- * used to live on the Budsjett page. Two states: everything reconciled, or
- * transactions still needing follow-up.
+ * Forbruk = the "past": actual spending. It owns the complete transaction list
+ * (bank + credit card in one view) plus the budget-vs-actual comparison and
+ * the shared split that used to live on the Budsjett page. Two states:
+ * everything reconciled, or transactions still needing follow-up.
  *
- * Planning (editing budgeted amounts) stays on the Budsjett page — here the
- * budget figures are read-only context for the actuals.
+ * Getting transactions in happens on the Import page; planning (editing
+ * budgeted amounts) stays on Budsjett — here the budget figures are read-only
+ * context for the actuals.
  */
 export default function Forbruk() {
     const { activeBudget, expenses, transactions, accounts, budgetItemDefs, categories, loading, getMonthlyBudget } = useBudget();
@@ -24,15 +25,7 @@ export default function Forbruk() {
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
     const [reconcileNonce, setReconcileNonce] = useState(0);
-    const [isImportOpen, setIsImportOpen] = useState(false);
     const [detailsItem, setDetailsItem] = useState(null);
-
-    const creditCardIds = useMemo(
-        () => new Set(accounts.filter(a => a.type === 'Kredittkort').map(a => a.id)),
-        [accounts]
-    );
-    const bankAccounts = accounts.filter(a => a.type !== 'Kredittkort');
-    const bankTxFilter = (t) => !creditCardIds.has(t.accountId);
 
     if (loading) return <div>Laster forbruk...</div>;
     if (!activeBudget) return <div>Ingen budsjett valgt.</div>;
@@ -42,12 +35,12 @@ export default function Forbruk() {
         return new Date(year, parseInt(month) - 1).toLocaleDateString('no-NO', { month: 'long', year: 'numeric' });
     };
 
-    // --- Two-state: bank transactions still needing follow-up this month.
+    // --- Two-state: transactions still needing follow-up this month.
     // "Handled" = reconciled OR linked to a budget item (companion-app
     // transactions arrive pre-linked with reconciled:false). ---
     const isHandled = (t) => t.reconciled || !!t.budgetItemId;
-    const bankMonthTransactions = transactions.filter(t => bankTxFilter(t) && t.month === selectedMonth);
-    const unreconciledCount = bankMonthTransactions.filter(t => !isHandled(t)).length;
+    const monthTransactions = transactions.filter(t => t.month === selectedMonth);
+    const unreconciledCount = monthTransactions.filter(t => !isHandled(t)).length;
 
     // --- Budget vs Actual (read-only context, computed budget-wide) ---
     // Items whose def or category is flagged "utenfor statistikk" are kept out
@@ -93,12 +86,11 @@ export default function Forbruk() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Forbruk</h1>
-                <button onClick={() => setIsImportOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 shadow-sm text-sm">
+                <Link to="/import" className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm">
                     <Download className="w-4 h-4" />
-                    <span>Hent fra bank</span>
-                </button>
+                    <span>Til import</span>
+                </Link>
             </div>
-            <ImportTransactionsModal isOpen={isImportOpen} onClose={() => setIsImportOpen(false)} />
 
             {/* Two-state banner */}
             {unreconciledCount > 0 ? (
@@ -186,12 +178,11 @@ export default function Forbruk() {
                 selectedMonth={selectedMonth}
             />
 
-            {/* Transactions (bank accounts) */}
+            {/* Transactions (all accounts, bank + credit card) */}
             <TransactionsPanel
-                accounts={bankAccounts}
+                accounts={accounts}
                 selectedMonth={selectedMonth}
                 setSelectedMonth={setSelectedMonth}
-                transactionFilter={bankTxFilter}
                 reconcileNonce={reconcileNonce}
             />
         </div>

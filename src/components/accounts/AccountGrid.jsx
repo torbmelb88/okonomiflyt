@@ -4,7 +4,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 /**
  * Grid of account cards with add/edit/delete. Accounts are global; each shows
  * its default budget (where new transactions land unless overridden). Shared by
- * the Kontoer (bank) and Kredittkort pages — each passes its filtered list.
+ * the bank and credit-card sections on Kontoer — each passes its filtered list.
  */
 export default function AccountGrid({ accounts, onAdd, onEdit, onDelete, addLabel = 'Legg til konto' }) {
     const { budgets, bankBalances } = useBudget();

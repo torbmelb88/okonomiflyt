@@ -102,7 +102,7 @@ export default function Header() {
                     <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
                         <Link to="/budget" className={`hover:text-white/80 transition-colors ${isActive('/budget') ? 'font-bold' : ''}`}>Budsjett</Link>
                         <Link to="/forbruk" className={`hover:text-white/80 transition-colors ${isActive('/forbruk') ? 'font-bold' : ''}`}>Forbruk</Link>
-                        <Link to="/kredittkort" className={`hover:text-white/80 transition-colors ${isActive('/kredittkort') ? 'font-bold' : ''}`}>Kredittkort</Link>
+                        <Link to="/import" className={`hover:text-white/80 transition-colors ${isActive('/import') ? 'font-bold' : ''}`}>Import</Link>
                         <Link to="/sparing" className={`hover:text-white/80 transition-colors ${isActive('/sparing') ? 'font-bold' : ''}`}>Sparing</Link>
                         <Link to="/accounts" className={`hover:text-white/80 transition-colors ${isActive('/accounts') ? 'font-bold' : ''}`}>Kontoer</Link>
                         <Link to="/oppgjor" className={`hover:text-white/80 transition-colors ${isActive('/oppgjor') ? 'font-bold' : ''}`}>Oppgjør</Link>
@@ -175,14 +175,14 @@ export default function Header() {
                             </Link>
 
                             <Link
-                                to="/kredittkort"
+                                to="/import"
                                 onClick={() => setIsMobileNavOpen(false)}
                                 className={clsx(
                                     "block px-4 py-3 rounded-lg text-base font-medium transition-colors",
-                                    isActive('/kredittkort') ? "bg-white/10" : "hover:bg-white/10"
+                                    isActive('/import') ? "bg-white/10" : "hover:bg-white/10"
                                 )}
                             >
-                                Kredittkort
+                                Import
                             </Link>
 
                             <Link
