@@ -1,0 +1,16 @@
+{
+    "name": "okonomiflyt-mcp",
+    "version": "1.0.0",
+    "description": "Remote MCP server for ØkonomiFlyt (claude.ai custom connector)",
+    "type": "module",
+    "main": "index.js",
+    "engines": {
+        "node": "22"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.0",
+        "firebase-admin": "^13.0.0",
+        "firebase-functions": "^6.0.0",
+        "zod": "^3.24.0"
+    }
+}

@@ -31,6 +31,8 @@ Prosjektet består av tre deler:
 - **Matvareinnsikt** – varelinjer kategoriseres og aggregeres per kjede
 - **Prosjekter** – øremerkede utgifter (oppussing, ferie) på tvers av budsjetter
 - **Refusjoner og utlegg** – retur/utlegg håndteres eksplisitt i oppgjøret
+- **Claude-connector (MCP)** – spør Claude om økonomien fra mobilen og
+  registrer utlegg i chat, via en remote MCP-server ([mcp-server/](mcp-server/))
 
 ## Skjermbilder (demo-modus)
 
@@ -85,6 +87,12 @@ Android-appen bygges i Android Studio og trenger din egen
 Firebase-enhetskonto (Firestore-reglene i [firestore.rules](firestore.rules)
 slipper kun kjente bruker-ID-er til).
 Synk-tjenesten er dokumentert i [sb1-sync/README.md](sb1-sync/README.md).
+
+### MCP-server (Claude-connector)
+
+En Cloud Function i samme Firebase-prosjekt eksponerer appen som custom
+connector for Claude på claude.ai/mobil — se
+[mcp-server/README.md](mcp-server/README.md) for oppsett og verktøyliste.
 
 ## Arkitektur i korte trekk
 
