@@ -366,6 +366,12 @@ export function BudgetProvider({ children }) {
             isRefund: !!(keep.isRefund || remove.isRefund),
             refundOfTransactionId: prefer('refundOfTransactionId'),
             reconciled: !!(keep.reconciled || remove.reconciled),
+            // Foreign purchase merged into the bank's converted NOK copy: the
+            // survivor keeps the NOK amount, but remember what was paid abroad.
+            // Deliberately NOT copying `currency` itself — that would mislabel
+            // the survivor's NOK amount as foreign.
+            originalAmount: keep.originalAmount ?? (remove.currency && remove.currency !== 'NOK' ? remove.amount : null),
+            originalCurrency: keep.originalCurrency ?? (remove.currency && remove.currency !== 'NOK' ? remove.currency : null),
         };
         await api.updateDocument('transactions', keepId, patch);
         if (remove.receiptId) {

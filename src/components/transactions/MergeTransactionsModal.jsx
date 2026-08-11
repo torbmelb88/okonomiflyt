@@ -32,9 +32,12 @@ export default function MergeTransactionsModal({ isOpen, onClose, transaction })
     const sourceLabel = (t) => t.source === 'companion_app' ? 'Companion-app' : t.source === 'sb1' ? 'Bank (SB1)' : 'Manuell/CSV';
     const daysBetween = (d1, d2) => Math.abs(new Date(d2) - new Date(d1)) / 86400000;
 
-    // Likely duplicates first: same amount, close date, similar name
+    // Likely duplicates first: same amount, close date, similar name.
+    // A foreign-currency copy (e.g. SEK from the companion app) never matches
+    // the bank's converted NOK amount, so those pairs skip the amount penalty.
+    const isForeign = (t) => t.currency && t.currency !== 'NOK';
     const rank = (t) =>
-        (Math.abs(t.amount - transaction.amount) < 0.01 ? 0 : 4) +
+        (isForeign(t) || isForeign(transaction) ? 0 : (Math.abs(t.amount - transaction.amount) < 0.01 ? 0 : 4)) +
         (daysBetween(t.date, transaction.date) <= 4 ? 0 : 2) +
         (stringsAreSimilar(t.name, transaction.name) ? 0 : 1);
     const candidates = transactions
@@ -93,7 +96,7 @@ export default function MergeTransactionsModal({ isOpen, onClose, transaction })
             <div className="text-sm text-gray-500 dark:text-gray-400">{t.date} • {sourceLabel(t)}{t.reconciled ? ' • ✓ Avstemt' : ''}</div>
             <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5"><CreditCard className="w-3 h-3" />{accountName(t.accountId)}</div>
             <div className={clsx('text-lg font-bold mt-1', t.type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
-                {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString('no-NO')} kr
+                {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString('no-NO')} {isForeign(t) ? t.currency : 'kr'}
             </div>
         </button>
     );
@@ -132,7 +135,7 @@ export default function MergeTransactionsModal({ isOpen, onClose, transaction })
                                             <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date} • {accountName(t.accountId)} • {sourceLabel(t)}</span>
                                         </span>
                                         <span className={clsx('font-semibold whitespace-nowrap', t.type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
-                                            {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString('no-NO')} kr
+                                            {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString('no-NO')} {isForeign(t) ? t.currency : 'kr'}
                                         </span>
                                     </button>
                                 ))}

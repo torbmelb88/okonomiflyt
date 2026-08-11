@@ -12,6 +12,7 @@ data class TriggerEvent(
     val date: String,      // YYYY-MM-DD, the day the payment was captured
     val timestamp: Long,   // epoch millis of the trigger
     val saved: Boolean,    // true once the transaction was logged to Firestore
+    val currency: String,  // ISO code for foreign purchases ("SEK"); empty = NOK
 )
 
 /**
@@ -24,10 +25,10 @@ object TriggerHistory {
     private const val KEY = "events"
     private const val MAX = 10
 
-    fun record(context: Context, merchant: String, amount: String, card: String, date: String): Long {
+    fun record(context: Context, merchant: String, amount: String, card: String, date: String, currency: String = ""): Long {
         val id = System.currentTimeMillis()
         val events = load(context).toMutableList()
-        events.add(0, TriggerEvent(id, merchant, amount, card, date, id, saved = false))
+        events.add(0, TriggerEvent(id, merchant, amount, card, date, id, saved = false, currency = currency))
         store(context, events.take(MAX))
         return id
     }
@@ -57,6 +58,7 @@ object TriggerHistory {
                     date = o.optString("date", ""),
                     timestamp = o.optLong("timestamp", o.getLong("id")),
                     saved = o.optBoolean("saved", false),
+                    currency = o.optString("currency", ""),
                 )
             }
         } catch (_: Exception) {
@@ -75,6 +77,7 @@ object TriggerHistory {
                 put("date", e.date)
                 put("timestamp", e.timestamp)
                 put("saved", e.saved)
+                put("currency", e.currency)
             })
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

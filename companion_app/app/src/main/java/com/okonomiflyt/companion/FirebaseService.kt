@@ -250,7 +250,8 @@ class FirebaseService {
         projectId: String? = null,
         projectSubcategory: String? = null,
         paidPrivately: Boolean = false,
-        coveredByAccountId: String? = null
+        coveredByAccountId: String? = null,
+        currency: String? = null
     ): Boolean {
         return try {
             val amountNum = amount.replace(Regex("[^\\d,.-]"), "").replace(",", ".").toDoubleOrNull() ?: 0.0
@@ -300,6 +301,10 @@ class FirebaseService {
                 // Outlay: shared cost paid with private money — the web app
                 // deducts this from the payer's transfer to the joint account
                 "paidPrivatelyBy" to if (paidPrivately) "self" else null,
+                // Foreign purchase: amount is in this currency, not NOK — the
+                // bank later posts the converted NOK amount, which replaces
+                // this copy via merge. Null for domestic purchases.
+                "currency" to currency,
                 "reconciled" to false,
                 "source" to "companion_app",
                 "createdAt" to java.util.Date()

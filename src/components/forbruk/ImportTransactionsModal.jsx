@@ -24,6 +24,22 @@ const isUnbooked = (s) =>
     (typeof s.externalId === 'string' && s.externalId.endsWith(PLACEHOLDER_ID_SUFFIX)) ||
     (s.bookingStatus ? s.bookingStatus !== 'BOOKED' : looksLikePlaceholder(s.name));
 
+// Rough NOK value of one foreign unit — used only to reject implausible
+// currency pairings; the bank's converted amount is always the truth. The
+// generous ±25% band absorbs rate drift and card fees. Mirrors the companion
+// app's currency whitelist (NotificationService.foreignCurrencies).
+const FX_GUESS = {
+    SEK: 0.95, DKK: 1.55, EUR: 11.5, USD: 10.5, GBP: 13.5, CHF: 12.5,
+    PLN: 2.7, CZK: 0.47, HUF: 0.03, ISK: 0.075, THB: 0.30, JPY: 0.07,
+    CAD: 7.6, AUD: 6.9, NZD: 6.3, TRY: 0.25, AED: 2.9, SGD: 7.9, HKD: 1.35,
+};
+const fxPlausible = (code, foreignAmount, nokAmount) => {
+    const rate = FX_GUESS[code];
+    if (!rate || !foreignAmount || !nokAmount) return false;
+    const implied = nokAmount / foreignAmount;
+    return implied >= rate * 0.75 && implied <= rate * 1.25;
+};
+
 const firstOfThisMonth = () => {
     const n = new Date();
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
@@ -42,12 +58,14 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
     const [running, setRunning] = useState(false);
     const [done, setDone] = useState(null);
     const [error, setError] = useState('');
+    // Currency-pair suggestions the user has un-ticked (keyed by pair key)
+    const [fxOff, setFxOff] = useState(() => new Set());
 
     useEffect(() => {
         if (!isOpen) return;
         let cancelled = false;
         const load = async () => {
-            setRaw(null); setError(''); setDone(null);
+            setRaw(null); setError(''); setDone(null); setFxOff(new Set());
             try {
                 const [staged, accounts, existing] = await Promise.all([
                     api.getCollection('sb1Transactions'),
@@ -75,7 +93,9 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
         const toMerge = [];
         const toUpdate = [];
         const toRebook = [];
+        const toFx = [];
         const rebookedIds = new Set();
+        const fxClaimedIds = new Set();
         const pendingRows = [];
         let alreadyImported = 0, noAccount = 0, noBudget = 0, beforeFrom = 0;
 
@@ -107,8 +127,12 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
             const budgetId = acc.defaultBudgetId || acc.budgetId;
             if (!budgetId) { noBudget++; continue; }
 
+            // Foreign-currency copies (companion app abroad, amount in SEK/EUR/…)
+            // never equal the bank's converted NOK amount — an exact-amount hit
+            // would be coincidence, so they are only linked manually via merge.
             const match = existing.find(t =>
                 t.accountId === acc.id && !t.externalId &&
+                (!t.currency || t.currency === 'NOK') &&
                 Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 &&
                 t.date && datesClose(t.date, s.date)
             );
@@ -124,8 +148,47 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 &&
                 t.date && datesClose(t.date, s.date, 7)
             );
+            // Foreign purchase logged by the companion app: same account, close
+            // date, and a NOK/foreign ratio inside a plausible exchange-rate
+            // band. Suggested for confirmation, never linked automatically —
+            // the bank row replaces the foreign amount only when accepted.
+            const fx = !match && !rebook && existing.find(t =>
+                t.accountId === acc.id && !t.externalId &&
+                t.currency && t.currency !== 'NOK' &&
+                !fxClaimedIds.has(t.id) &&
+                t.type === s.type &&
+                t.date && datesClose(t.date, s.date, 5) &&
+                fxPlausible(t.currency, t.amount, s.amount)
+            );
             if (match) {
                 toMerge.push({ existingId: match.id, externalId: s.externalId });
+            } else if (fx) {
+                fxClaimedIds.add(fx.id);
+                toFx.push({
+                    key: `${fx.id}|${s.externalId}`,
+                    existing: { id: fx.id, name: fx.name, date: fx.date, amount: fx.amount, currency: fx.currency },
+                    staged: { name: s.name || 'Ukjent transaksjon', date: s.date, amount: s.amount },
+                    // Accepted: the companion doc takes over the bank row's
+                    // identity (recognized via externalId on later imports) and
+                    // keeps the foreign amount as originalAmount/-Currency.
+                    patch: {
+                        name: s.name || fx.name,
+                        date: s.date,
+                        month: (s.date || '').slice(0, 7),
+                        amount: s.amount,
+                        externalId: s.externalId,
+                        source: 'sb1',
+                        currency: null,
+                        originalAmount: fx.amount,
+                        originalCurrency: fx.currency,
+                    },
+                    // Declined: the bank row comes in as its own transaction.
+                    create: {
+                        budgetId, accountId: acc.id, date: s.date, month: (s.date || '').slice(0, 7),
+                        name: s.name || 'Ukjent transaksjon', amount: s.amount, type: s.type,
+                        externalId: s.externalId,
+                    },
+                });
             } else if (rebook) {
                 rebookedIds.add(rebook.id);
                 toRebook.push({
@@ -144,7 +207,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 });
             }
         }
-        return { toCreate, toMerge, toUpdate, toRebook, alreadyImported, noAccount, noBudget, beforeFrom, pendingRows };
+        return { toCreate, toMerge, toUpdate, toRebook, toFx, alreadyImported, noAccount, noBudget, beforeFrom, pendingRows };
     }, [raw, fromDate]);
 
     const byAccount = useMemo(() => {
@@ -174,8 +237,21 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 const { id, ...patch } = r;
                 await api.updateDocument('transactions', id, patch);
             }
+            let fxLinked = 0, fxCreated = 0;
+            for (const f of plan.toFx) {
+                if (fxOff.has(f.key)) {
+                    await api.addDocument('transactions', {
+                        ...f.create, reconciled: false, source: 'sb1',
+                        createdAt: new Date().toISOString(),
+                    });
+                    fxCreated++;
+                } else {
+                    await api.updateDocument('transactions', f.existing.id, f.patch);
+                    fxLinked++;
+                }
+            }
             await reloadTransactions();
-            setDone({ created: plan.toCreate.length, merged: plan.toMerge.length, updated: plan.toUpdate.length + plan.toRebook.length });
+            setDone({ created: plan.toCreate.length + fxCreated, merged: plan.toMerge.length, updated: plan.toUpdate.length + plan.toRebook.length, fxLinked });
         } catch (e) {
             setError('Import feilet: ' + e.message);
         } finally {
@@ -207,7 +283,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                             <CheckCircle2 className="w-10 h-10 text-green-600 dark:text-green-400" />
                             <h3 className="font-bold text-gray-900 dark:text-white">Ferdig</h3>
                             <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Hentet inn {done.created} nye transaksjoner{done.merged > 0 ? `, slo sammen ${done.merged} med eksisterende` : ''}{done.updated > 0 ? `, og oppdaterte navn på ${done.updated}` : ''}. De nye ligger som uavstemt.
+                                Hentet inn {done.created} nye transaksjoner{done.merged > 0 ? `, slo sammen ${done.merged} med eksisterende` : ''}{done.fxLinked > 0 ? `, koblet ${done.fxLinked} valutakjøp til bankbeløpet` : ''}{done.updated > 0 ? `, og oppdaterte navn på ${done.updated}` : ''}. De nye ligger som uavstemt.
                             </p>
                         </div>
                     ) : (
@@ -230,8 +306,37 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                                         <Stat label="Eldre enn datoen" value={plan.beforeFrom} />
                                         {plan.toUpdate.length > 0 && <Stat label="Navn oppdateres" value={plan.toUpdate.length} />}
                                         {plan.toRebook.length > 0 && <Stat label="Bokført (oppdateres)" value={plan.toRebook.length} />}
+                                        {plan.toFx.length > 0 && <Stat label="Valutatreff" value={plan.toFx.length} highlight />}
                                         {plan.pendingRows.length > 0 && <Stat label="Venter bokføring" value={plan.pendingRows.length} />}
                                     </div>
+                                    {plan.toFx.length > 0 && (
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Sannsynlige valutatreff: bankens NOK-beløp erstatter det utenlandske beløpet, og kategori/kommentar beholdes. Fjern haken hvis paret ikke hører sammen — da hentes bankraden inn som egen transaksjon.</p>
+                                            <div className="border border-sky-200 dark:border-sky-800 rounded-lg divide-y divide-gray-100 dark:divide-gray-700 text-xs max-h-40 overflow-y-auto">
+                                                {plan.toFx.map(f => (
+                                                    <label key={f.key} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-sky-50 dark:hover:bg-sky-900/20">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={!fxOff.has(f.key)}
+                                                            onChange={() => setFxOff(prev => {
+                                                                const next = new Set(prev);
+                                                                if (next.has(f.key)) next.delete(f.key); else next.add(f.key);
+                                                                return next;
+                                                            })}
+                                                            className="rounded text-sky-600 focus:ring-sky-500"
+                                                        />
+                                                        <span className="flex-1 min-w-0">
+                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{f.staged.name}</span>
+                                                            <span className="block text-gray-500 dark:text-gray-400 truncate">{f.existing.name} • {f.existing.date}</span>
+                                                        </span>
+                                                        <span className="whitespace-nowrap text-gray-700 dark:text-gray-300">
+                                                            {(f.existing.amount || 0).toLocaleString('no-NO')} {f.existing.currency} → {(f.staged.amount || 0).toLocaleString('no-NO')} kr
+                                                        </span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                     {plan.pendingRows.length > 0 && (
                                         <div className="space-y-1">
                                             <p className="text-xs text-gray-500 dark:text-gray-400">Ubokførte betalinger og reservasjoner hoppes over — de hentes automatisk når banken har bokført dem:</p>
@@ -273,7 +378,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                     ) : (
                         <>
                             <button onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Avbryt</button>
-                            <button onClick={apply} disabled={!plan || running || (plan.toCreate.length === 0 && plan.toMerge.length === 0 && plan.toUpdate.length === 0 && plan.toRebook.length === 0)}
+                            <button onClick={apply} disabled={!plan || running || (plan.toCreate.length === 0 && plan.toMerge.length === 0 && plan.toUpdate.length === 0 && plan.toRebook.length === 0 && plan.toFx.length === 0)}
                                 className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm disabled:bg-gray-300 disabled:cursor-not-allowed">
                                 {running ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                                 {running ? 'Henter…' : 'Hent inn'}

@@ -40,6 +40,7 @@ class LogTransactionActivity : ComponentActivity() {
         val amount = intent.getStringExtra("amount") ?: "0"
         val card = intent.getStringExtra("card") ?: ""
         val date = intent.getStringExtra("date") ?: java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val currency = intent.getStringExtra("currency")?.takeIf { it.isNotEmpty() }
         val triggerId = intent.getLongExtra("triggerId", -1L)
 
         setContent {
@@ -49,6 +50,7 @@ class LogTransactionActivity : ComponentActivity() {
                     amount = amount,
                     card = card,
                     date = date,
+                    currency = currency,
                     onSaved = { if (triggerId != -1L) TriggerHistory.markSaved(this, triggerId) },
                     onDismiss = { finish() }
                 )
@@ -64,6 +66,7 @@ fun LogTransactionScreen(
     amount: String,
     card: String,
     date: String,
+    currency: String? = null,
     onSaved: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
@@ -217,11 +220,18 @@ fun LogTransactionScreen(
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "$amount kr",
+                        text = if (currency != null) "$amount $currency" else "$amount kr",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
+                    if (currency != null) {
+                        Text(
+                            text = "Utenlandsk valuta — banken fører det vekslede NOK-beløpet senere",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (card.isNotEmpty()) {
@@ -327,7 +337,8 @@ fun LogTransactionScreen(
                                     projectId = selectedProject?.id,
                                     projectSubcategory = if (selectedProject != null) selectedProjectSubcategory else null,
                                     paidPrivately = showPaidPrivately && paidPrivately,
-                                    coveredByAccountId = coveredByAccountId
+                                    coveredByAccountId = coveredByAccountId,
+                                    currency = currency
                                 )
                                 isSaving = false
                                 if (success) { onSaved(); onDismiss() }

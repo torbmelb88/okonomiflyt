@@ -80,11 +80,12 @@ class NotificationService : NotificationListenerService() {
             if (amount != null) {
                 // If we found an amount, likely a transaction.
                 // Trigger our own "Ask for comment" notification
-                
+
                 // Allow card info update even if we saw it before?
                 // The deduplication logic above prevents spamming the user.
                 val cardInfo = extractCardInfo(text) ?: extractCardInfo(title) ?: ""
-                promptForComment(title, amount, cardInfo)
+                val currency = extractCurrency(title) ?: extractCurrency(text)
+                promptForComment(title, amount, cardInfo, currency)
             } else {
                  Log.d(TAG, "Could not extract amount from: $text")
             }
@@ -104,6 +105,24 @@ class NotificationService : NotificationListenerService() {
         return null
     }
 
+    // Foreign purchases: Wallet shows "Beløp SEK 85,00" — the amount is in the
+    // original currency and the bank posts a converted NOK amount later.
+    // NOK/"kr" is domestic and returns null. Whitelist to avoid false positives
+    // from uppercase words in merchant names.
+    private val foreignCurrencies = setOf(
+        "SEK", "DKK", "EUR", "USD", "GBP", "CHF", "PLN", "CZK", "HUF", "ISK",
+        "THB", "JPY", "CAD", "AUD", "NZD", "TRY", "AED", "SGD", "HKD"
+    )
+
+    private fun extractCurrency(text: String): String? {
+        val matcher = Pattern.compile("\\b([A-Z]{3})\\b").matcher(text)
+        while (matcher.find()) {
+            val code = matcher.group(1)
+            if (code in foreignCurrencies) return code
+        }
+        return null
+    }
+
     private fun extractCardInfo(text: String): String? {
         // Matches "•••• 1234", "••1234", "Visa 1234", "*** 1234"
         // Key fix: Allow 2 to 4 dots/bullets
@@ -114,18 +133,19 @@ class NotificationService : NotificationListenerService() {
         return null
     }
 
-    private fun promptForComment(merchant: String, amount: String, cardInfo: String) {
+    private fun promptForComment(merchant: String, amount: String, cardInfo: String, currency: String? = null) {
         val notificationId = System.currentTimeMillis().toInt()
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         // Remember the trigger locally so a dismissed logging flow can be
         // reopened from the home screen ("Siste kjøp").
-        val triggerId = TriggerHistory.record(this, merchant, amount, cardInfo, today)
+        val triggerId = TriggerHistory.record(this, merchant, amount, cardInfo, today, currency ?: "")
 
         val intent = Intent(this, com.okonomiflyt.companion.ui.LogTransactionActivity::class.java).apply {
             putExtra("merchant", merchant)
             putExtra("amount", amount)
             putExtra("card", cardInfo)
             putExtra("date", today)
+            putExtra("currency", currency)
             putExtra("triggerId", triggerId)
             putExtra("notificationId", notificationId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -138,7 +158,8 @@ class NotificationService : NotificationListenerService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
-        val contentText = if (cardInfo.isNotEmpty()) "Beløp: $amount. Kort: •••• $cardInfo" else "Beløp: $amount"
+        val amountLabel = if (currency != null) "$amount $currency" else amount
+        val contentText = if (cardInfo.isNotEmpty()) "Beløp: $amountLabel. Kort: •••• $cardInfo" else "Beløp: $amountLabel"
 
         val action = NotificationCompat.Action.Builder(
             android.R.drawable.ic_menu_edit,

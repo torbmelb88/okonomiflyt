@@ -134,6 +134,7 @@ fun HomeScreen(resumeTick: Int, onOpenSettings: () -> Unit) {
                                         putExtra("amount", event.amount)
                                         putExtra("card", event.card)
                                         putExtra("date", event.date)
+                                        putExtra("currency", event.currency.ifEmpty { null })
                                         putExtra("triggerId", event.id)
                                     }
                                 )
@@ -208,7 +209,7 @@ fun TriggerRow(event: TriggerEvent, onRemove: () -> Unit, onClick: () -> Unit) {
                 )
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("${event.amount} kr", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("${event.amount} ${event.currency.ifEmpty { "kr" }}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(
                     if (event.saved) "Lagret" else "Ikke lagret",
                     style = MaterialTheme.typography.labelSmall,
