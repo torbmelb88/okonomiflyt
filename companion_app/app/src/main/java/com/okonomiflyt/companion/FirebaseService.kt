@@ -30,7 +30,10 @@ data class Account(
     val id: String,
     val name: String,
     val defaultBudgetId: String,
-    val cardLastFour: String?
+    val cardLastFour: String?,
+    // Google Wallet-kallenavn: når kortet har kallenavn viser varselet det i
+    // stedet for kortnummeret, så vi matcher på tekst i varselet.
+    val cardNickname: String? = null
 )
 
 data class Project(
@@ -106,9 +109,10 @@ class FirebaseService {
             snapshot.documents.mapNotNull { doc ->
                 val name = doc.getString("name") ?: return@mapNotNull null
                 val cardLastFour = doc.getString("cardLastFour")
+                val cardNickname = doc.getString("cardNickname")
                 // Accounts are global now: read defaultBudgetId (legacy budgetId as fallback).
                 val accBudgetId = doc.getString("defaultBudgetId") ?: doc.getString("budgetId") ?: ""
-                Account(doc.id, name, accBudgetId, cardLastFour)
+                Account(doc.id, name, accBudgetId, cardLastFour, cardNickname)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching accounts", e)

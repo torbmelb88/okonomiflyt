@@ -8,6 +8,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
     const [name, setName] = useState('');
     const [type, setType] = useState(defaultType);
     const [cardLastFour, setCardLastFour] = useState('');
+    const [cardNickname, setCardNickname] = useState('');
     const [defaultBudgetId, setDefaultBudgetId] = useState('');
     const [excludeFromSharedCalc, setExcludeFromSharedCalc] = useState(false);
     const [isBillAccount, setIsBillAccount] = useState(false);
@@ -18,6 +19,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
             setName(accountToEdit.name);
             setType(accountToEdit.type);
             setCardLastFour(accountToEdit.cardLastFour || '');
+            setCardNickname(accountToEdit.cardNickname || '');
             setDefaultBudgetId(accountToEdit.defaultBudgetId || accountToEdit.budgetId || activeBudget?.id || '');
             setExcludeFromSharedCalc(!!accountToEdit.excludeFromSharedCalc);
             setIsBillAccount(!!accountToEdit.isBillAccount);
@@ -26,6 +28,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
             setName('');
             setType(defaultType);
             setCardLastFour('');
+            setCardNickname('');
             setDefaultBudgetId(activeBudget?.id || budgets[0]?.id || '');
             setExcludeFromSharedCalc(false);
             setIsBillAccount(false);
@@ -44,6 +47,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
                 name,
                 type,
                 cardLastFour,
+                cardNickname: cardNickname.trim(),
                 defaultBudgetId,
                 excludeFromSharedCalc,
                 isBillAccount
@@ -129,6 +133,19 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                             Brukes for å filtrere import fra mobilappen automatisk.
+                        </p>
+                        <div className="relative">
+                            <CreditCard className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                            <input
+                                type="text"
+                                value={cardNickname}
+                                onChange={(e) => setCardNickname(e.target.value)}
+                                placeholder="Kallenavn (f.eks. Felleskortet)"
+                                className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none dark:bg-gray-700 dark:text-white dark:placeholder-gray-400"
+                            />
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Har kortet et kallenavn i Google Wallet, inneholder varselet kallenavnet i stedet for kortnummeret. Mobilappen matcher da kontoen på kallenavnet.
                         </p>
                     </div>
 

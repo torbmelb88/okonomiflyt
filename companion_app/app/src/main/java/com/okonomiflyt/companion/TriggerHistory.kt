@@ -13,6 +13,7 @@ data class TriggerEvent(
     val timestamp: Long,   // epoch millis of the trigger
     val saved: Boolean,    // true once the transaction was logged to Firestore
     val currency: String,  // ISO code for foreign purchases ("SEK"); empty = NOK
+    val notifText: String, // full notification text, for nickname-based account matching
 )
 
 /**
@@ -25,10 +26,10 @@ object TriggerHistory {
     private const val KEY = "events"
     private const val MAX = 10
 
-    fun record(context: Context, merchant: String, amount: String, card: String, date: String, currency: String = ""): Long {
+    fun record(context: Context, merchant: String, amount: String, card: String, date: String, currency: String = "", notifText: String = ""): Long {
         val id = System.currentTimeMillis()
         val events = load(context).toMutableList()
-        events.add(0, TriggerEvent(id, merchant, amount, card, date, id, saved = false, currency = currency))
+        events.add(0, TriggerEvent(id, merchant, amount, card, date, id, saved = false, currency = currency, notifText = notifText))
         store(context, events.take(MAX))
         return id
     }
@@ -59,6 +60,7 @@ object TriggerHistory {
                     timestamp = o.optLong("timestamp", o.getLong("id")),
                     saved = o.optBoolean("saved", false),
                     currency = o.optString("currency", ""),
+                    notifText = o.optString("notifText", ""),
                 )
             }
         } catch (_: Exception) {
@@ -78,6 +80,7 @@ object TriggerHistory {
                 put("timestamp", e.timestamp)
                 put("saved", e.saved)
                 put("currency", e.currency)
+                put("notifText", e.notifText)
             })
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

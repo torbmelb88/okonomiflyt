@@ -37,10 +37,13 @@ export default function AccountGrid({ accounts, onAdd, onEdit, onDelete, addLabe
                             ) : null;
                         })()}
 
-                        {account.cardLastFour && (
+                        {(account.cardLastFour || account.cardNickname) && (
                             <div className="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                                 <CreditCard className="w-3 h-3" />
-                                <span>••• {account.cardLastFour}</span>
+                                <span>
+                                    {[account.cardLastFour && `••• ${account.cardLastFour}`, account.cardNickname && `«${account.cardNickname}»`]
+                                        .filter(Boolean).join(' · ')}
+                                </span>
                             </div>
                         )}
 

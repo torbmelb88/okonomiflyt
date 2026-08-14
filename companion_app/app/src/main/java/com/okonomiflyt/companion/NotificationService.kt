@@ -34,7 +34,9 @@ class NotificationService : NotificationListenerService() {
             val merchant = intent.getStringExtra("test_merchant") ?: "Kiwi Testbutikk"
             val amount = intent.getStringExtra("test_amount") ?: "6677,00"
             val card = intent.getStringExtra("test_card") ?: "6819"
-            promptForComment(merchant, amount, card)
+            // Syntetisk varseltekst så kallenavn-matching kan testes ved å
+            // skrive kallenavnet i kort-feltet.
+            promptForComment(merchant, amount, card.filter { it.isDigit() }, null, "$merchant $amount $card")
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -85,7 +87,10 @@ class NotificationService : NotificationListenerService() {
                 // The deduplication logic above prevents spamming the user.
                 val cardInfo = extractCardInfo(text) ?: extractCardInfo(title) ?: ""
                 val currency = extractCurrency(title) ?: extractCurrency(text)
-                promptForComment(title, amount, cardInfo, currency)
+                // Kort med kallenavn i Google Wallet har ikke kortnummer i
+                // varselet — send med hele teksten så kontoen kan matches på
+                // kallenavn i stedet.
+                promptForComment(title, amount, cardInfo, currency, "$title $text")
             } else {
                  Log.d(TAG, "Could not extract amount from: $text")
             }
@@ -133,12 +138,12 @@ class NotificationService : NotificationListenerService() {
         return null
     }
 
-    private fun promptForComment(merchant: String, amount: String, cardInfo: String, currency: String? = null) {
+    private fun promptForComment(merchant: String, amount: String, cardInfo: String, currency: String? = null, notifText: String = "") {
         val notificationId = System.currentTimeMillis().toInt()
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         // Remember the trigger locally so a dismissed logging flow can be
         // reopened from the home screen ("Siste kjøp").
-        val triggerId = TriggerHistory.record(this, merchant, amount, cardInfo, today, currency ?: "")
+        val triggerId = TriggerHistory.record(this, merchant, amount, cardInfo, today, currency ?: "", notifText)
 
         val intent = Intent(this, com.okonomiflyt.companion.ui.LogTransactionActivity::class.java).apply {
             putExtra("merchant", merchant)
@@ -146,6 +151,7 @@ class NotificationService : NotificationListenerService() {
             putExtra("card", cardInfo)
             putExtra("date", today)
             putExtra("currency", currency)
+            putExtra("notifText", notifText)
             putExtra("triggerId", triggerId)
             putExtra("notificationId", notificationId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK

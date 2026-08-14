@@ -135,6 +135,7 @@ fun HomeScreen(resumeTick: Int, onOpenSettings: () -> Unit) {
                                         putExtra("card", event.card)
                                         putExtra("date", event.date)
                                         putExtra("currency", event.currency.ifEmpty { null })
+                                        putExtra("notifText", event.notifText)
                                         putExtra("triggerId", event.id)
                                     }
                                 )

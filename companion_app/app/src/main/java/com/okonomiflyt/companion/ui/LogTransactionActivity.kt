@@ -39,6 +39,7 @@ class LogTransactionActivity : ComponentActivity() {
         val merchant = intent.getStringExtra("merchant") ?: "Ukjent"
         val amount = intent.getStringExtra("amount") ?: "0"
         val card = intent.getStringExtra("card") ?: ""
+        val notifText = intent.getStringExtra("notifText") ?: ""
         val date = intent.getStringExtra("date") ?: java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
         val currency = intent.getStringExtra("currency")?.takeIf { it.isNotEmpty() }
         val triggerId = intent.getLongExtra("triggerId", -1L)
@@ -49,6 +50,7 @@ class LogTransactionActivity : ComponentActivity() {
                     merchant = merchant,
                     amount = amount,
                     card = card,
+                    notifText = notifText,
                     date = date,
                     currency = currency,
                     onSaved = { if (triggerId != -1L) TriggerHistory.markSaved(this, triggerId) },
@@ -65,6 +67,7 @@ fun LogTransactionScreen(
     merchant: String,
     amount: String,
     card: String,
+    notifText: String = "",
     date: String,
     currency: String? = null,
     onSaved: () -> Unit = {},
@@ -105,8 +108,13 @@ fun LogTransactionScreen(
 
         val preference = firebaseService.getMerchantPreference(merchant)
 
+        // Match på kortnummer først; kort med kallenavn i Google Wallet har
+        // ikke kortnummer i varselet, så da matcher vi kallenavnet mot
+        // varselteksten i stedet.
         val cardMatchedAccount = accounts.find {
             it.cardLastFour != null && it.cardLastFour.isNotEmpty() && card.endsWith(it.cardLastFour)
+        } ?: accounts.find {
+            !it.cardNickname.isNullOrEmpty() && notifText.contains(it.cardNickname, ignoreCase = true)
         }
         cardAutoMatched = cardMatchedAccount != null
         val preferredAccount = preference?.accountId?.let { id -> accounts.find { it.id == id } }
@@ -392,7 +400,7 @@ fun StepAccount(
     Column(modifier = Modifier.fillMaxSize()) {
         if (cardAutoMatched) {
             Text(
-                text = "Konto er automatisk foreslått fra kortets siste 4 siffer",
+                text = "Konto er automatisk foreslått fra kortet i varselet",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
