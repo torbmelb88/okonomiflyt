@@ -9,6 +9,10 @@ export default function DuplicateReviewModal({ isOpen, onClose, duplicates, onCo
 
     const currentItem = duplicates[currentIndex];
     const isLast = currentIndex === duplicates.length - 1;
+    // Currency pair: the existing copy was logged abroad in foreign currency,
+    // the CSV row is the bank's converted NOK amount — different numbers by design.
+    const existingCurrency = currentItem.existing.currency && currentItem.existing.currency !== 'NOK'
+        ? currentItem.existing.currency : null;
 
     const handleDecision = (decision) => {
         setDecisions(prev => ({
@@ -77,7 +81,7 @@ export default function DuplicateReviewModal({ isOpen, onClose, duplicates, onCo
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">{currentItem.existing.name}</h3>
                                 <div className="text-sm text-gray-500 dark:text-gray-400 mb-3">{currentItem.existing.date}</div>
                                 <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                                    {currentItem.existing.amount.toLocaleString('no-NO')} kr
+                                    {currentItem.existing.amount.toLocaleString('no-NO')} {existingCurrency || 'kr'}
                                 </div>
                                 {currentItem.existing.comment && (
                                     <div className="mt-2 text-sm text-blue-700 dark:text-blue-300 italic">
@@ -88,6 +92,12 @@ export default function DuplicateReviewModal({ isOpen, onClose, duplicates, onCo
                         </div>
                     </div>
 
+                    {existingCurrency && (
+                        <p className="mt-4 text-sm text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 rounded-lg px-3 py-2">
+                            Valutatreff: beløpene er ulike fordi kjøpet ble logget i {existingCurrency} og banken har vekslet til NOK.
+                            «Knytt sammen» lar bankbeløpet ta over og beholder {existingCurrency}-beløpet som referanse.
+                        </p>
+                    )}
                     <div className="mt-8 flex justify-center space-x-4 flex-wrap gap-y-4">
                         <button
                             onClick={() => handleDecision('skip')}

@@ -3,6 +3,7 @@ import { X, Check, Merge, CreditCard, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
 import { stringsAreSimilar } from '../../utils/textMatch';
+import { reconcileState } from '../../utils/reconciliation';
 
 /**
  * Manual duplicate merge: pick the duplicate of `transaction`, then choose
@@ -29,7 +30,7 @@ export default function MergeTransactionsModal({ isOpen, onClose, transaction })
     if (!isOpen || !transaction) return null;
 
     const accountName = (id) => accounts.find(a => a.id === id)?.name || '';
-    const sourceLabel = (t) => t.source === 'companion_app' ? 'Companion-app' : t.source === 'sb1' ? 'Bank (SB1)' : 'Manuell/CSV';
+    const sourceLabel = (t) => t.source === 'companion_app' ? 'Companion-app' : t.source === 'mcp' ? 'Claude (MCP)' : t.source === 'sb1' ? 'Bank (SB1)' : 'Manuell/CSV';
     const daysBetween = (d1, d2) => Math.abs(new Date(d2) - new Date(d1)) / 86400000;
 
     // Likely duplicates first: same amount, close date, similar name.
@@ -93,7 +94,7 @@ export default function MergeTransactionsModal({ isOpen, onClose, transaction })
                     <span className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-600 text-white">Beholdes</span>
                 )}
             </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">{t.date} • {sourceLabel(t)}{t.reconciled ? ' • ✓ Avstemt' : ''}</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">{t.date} • {sourceLabel(t)}{reconcileState(t) === 'reconciled' ? ' • ✓ Avstemt' : reconcileState(t) === 'booked' ? ' • Bokført' : ''}</div>
             <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5"><CreditCard className="w-3 h-3" />{accountName(t.accountId)}</div>
             <div className={clsx('text-lg font-bold mt-1', t.type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
                 {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString('no-NO')} {isForeign(t) ? t.currency : 'kr'}

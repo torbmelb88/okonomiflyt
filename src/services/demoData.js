@@ -207,7 +207,10 @@ export function createDemoDb() {
         tx(0, 2, { budgetId: 'budget-shared', accountId: 'acc-kort', name: 'KIWI STORGATA', amount: 423.50, type: 'expense', reconciled: false }),
         tx(0, 4, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'REMA 1000 SENTRUM', amount: 512.30, type: 'expense', reconciled: false }),
         tx(0, 3, { budgetId: 'budget-personal', accountId: 'acc-kort', name: 'CIRCLE K HOVEDVEIEN', amount: 689, type: 'expense', reconciled: false }),
-        tx(0, 5, { budgetId: 'budget-personal', accountId: 'acc-kort', name: 'NETFLIX.COM', amount: 169, type: 'expense', reconciled: false })
+        tx(0, 5, { budgetId: 'budget-personal', accountId: 'acc-kort', name: 'NETFLIX.COM', amount: 169, type: 'expense', reconciled: false }),
+        // Logged with the companion app: booked (categorized) but awaiting the
+        // bank's copy — shows the "Bokført" state
+        tx(0, 6, { budgetId: 'budget-shared', accountId: 'acc-kort', name: 'MENY STORSENTERET', amount: 356.80, type: 'expense', budgetItemId: 'exp-mat', paidPrivatelyBy: 'self', reconciled: false, source: 'companion_app' })
     ];
 
     // The refund needs a reference to the purchase above

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, Download, CheckCircle2, AlertTriangle, Loader2, Calendar } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
+import { fxPlausible } from '../../utils/currency';
 
 const datesClose = (d1, d2, tol = 4) => {
     const diff = Math.abs(new Date(d2) - new Date(d1));
@@ -23,22 +24,6 @@ const PLACEHOLDER_ID_SUFFIX = ':000000000000000000';
 const isUnbooked = (s) =>
     (typeof s.externalId === 'string' && s.externalId.endsWith(PLACEHOLDER_ID_SUFFIX)) ||
     (s.bookingStatus ? s.bookingStatus !== 'BOOKED' : looksLikePlaceholder(s.name));
-
-// Rough NOK value of one foreign unit — used only to reject implausible
-// currency pairings; the bank's converted amount is always the truth. The
-// generous ±25% band absorbs rate drift and card fees. Mirrors the companion
-// app's currency whitelist (NotificationService.foreignCurrencies).
-const FX_GUESS = {
-    SEK: 0.95, DKK: 1.55, EUR: 11.5, USD: 10.5, GBP: 13.5, CHF: 12.5,
-    PLN: 2.7, CZK: 0.47, HUF: 0.03, ISK: 0.075, THB: 0.30, JPY: 0.07,
-    CAD: 7.6, AUD: 6.9, NZD: 6.3, TRY: 0.25, AED: 2.9, SGD: 7.9, HKD: 1.35,
-};
-const fxPlausible = (code, foreignAmount, nokAmount) => {
-    const rate = FX_GUESS[code];
-    if (!rate || !foreignAmount || !nokAmount) return false;
-    const implied = nokAmount / foreignAmount;
-    return implied >= rate * 0.75 && implied <= rate * 1.25;
-};
 
 const firstOfThisMonth = () => {
     const n = new Date();
@@ -161,7 +146,13 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 fxPlausible(t.currency, t.amount, s.amount)
             );
             if (match) {
-                toMerge.push({ existingId: match.id, externalId: s.externalId });
+                // The bank confirming an existing (typically companion-app) row
+                // is the actual reconciliation — avstemt if also categorized.
+                toMerge.push({
+                    existingId: match.id,
+                    externalId: s.externalId,
+                    reconciled: !!(match.reconciled || match.budgetItemId),
+                });
             } else if (fx) {
                 fxClaimedIds.add(fx.id);
                 toFx.push({
@@ -181,6 +172,8 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                         currency: null,
                         originalAmount: fx.amount,
                         originalCurrency: fx.currency,
+                        // Bank match confirmed — avstemt if also categorized
+                        reconciled: !!(fx.reconciled || fx.budgetItemId),
                     },
                     // Declined: the bank row comes in as its own transaction.
                     create: {
@@ -228,7 +221,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 });
             }
             for (const m of plan.toMerge) {
-                await api.updateDocument('transactions', m.existingId, { externalId: m.externalId, source: 'sb1' });
+                await api.updateDocument('transactions', m.existingId, { externalId: m.externalId, source: 'sb1', reconciled: m.reconciled });
             }
             for (const u of plan.toUpdate) {
                 await api.updateDocument('transactions', u.id, { name: u.name });

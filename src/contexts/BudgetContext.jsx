@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { api } from '../services/firebase';
 import { useAuth } from './AuthContext';
+import { isSelfReported, reconcilesOnLink } from '../utils/reconciliation';
 
 const BudgetContext = createContext();
 
@@ -365,7 +366,17 @@ export function BudgetProvider({ children }) {
             payer: prefer('payer'),
             isRefund: !!(keep.isRefund || remove.isRefund),
             refundOfTransactionId: prefer('refundOfTransactionId'),
-            reconciled: !!(keep.reconciled || remove.reconciled),
+            // The pair was matched against the bank, so the survivor carries
+            // the bank-side identity (externalId/source) even when the kept
+            // copy is the self-reported one — the next import then recognizes
+            // it, and the row no longer counts as awaiting a bank match.
+            externalId: prefer('externalId'),
+            source: (isSelfReported(keep) && !isSelfReported(remove) ? remove.source : keep.source) ?? null,
+            // Merging a self-reported copy (companion app/MCP) with the bank's
+            // copy IS the bank match — that is what makes the pair avstemt,
+            // provided the purchase is also categorized.
+            reconciled: !!(keep.reconciled || remove.reconciled ||
+                (isSelfReported(keep) !== isSelfReported(remove) && (keep.budgetItemId || remove.budgetItemId))),
             // Foreign purchase merged into the bank's converted NOK copy: the
             // survivor keeps the NOK amount, but remember what was paid abroad.
             // Deliberately NOT copying `currency` itself — that would mislabel
@@ -487,9 +498,13 @@ export function BudgetProvider({ children }) {
 
     const linkTransactionToBudgetItem = async (transactionId, budgetItemId) => {
         try {
+            const transaction = transactions.find(t => t.id === transactionId);
             await updateTransaction(transactionId, {
                 budgetItemId,
-                reconciled: true
+                // Bank rows are reconciled by categorizing them; self-reported
+                // and foreign-currency rows stay "bokført" until the bank copy
+                // arrives via import.
+                reconciled: !!transaction && reconcilesOnLink(transaction)
             });
         } catch (error) {
             console.error("Error linking transaction:", error);
@@ -526,7 +541,7 @@ export function BudgetProvider({ children }) {
             // 2. Link transaction to new budget item
             await updateTransaction(transaction.id, {
                 budgetItemId: docRef.id,
-                reconciled: true,
+                reconciled: reconcilesOnLink(transaction),
                 isUnnecessary: !!budgetItemData.isUnnecessary,
                 projectId: projectId || null
             });

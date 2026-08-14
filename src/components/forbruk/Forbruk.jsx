@@ -6,6 +6,7 @@ import { Users, DollarSign, AlertTriangle, CheckCircle2, Download } from 'lucide
 import clsx from 'clsx';
 import TransactionsPanel from '../transactions/TransactionsPanel';
 import BudgetItemDetailsModal from '../budget/BudgetItemDetailsModal';
+import { isHandled, reconcileState } from '../../utils/reconciliation';
 
 /**
  * Forbruk = the "past": actual spending. It owns the complete transaction list
@@ -35,12 +36,12 @@ export default function Forbruk() {
         return new Date(year, parseInt(month) - 1).toLocaleDateString('no-NO', { month: 'long', year: 'numeric' });
     };
 
-    // --- Two-state: transactions still needing follow-up this month.
-    // "Handled" = reconciled OR linked to a budget item (companion-app
-    // transactions arrive pre-linked with reconciled:false). ---
-    const isHandled = (t) => t.reconciled || !!t.budgetItemId;
+    // --- Two-state banner: transactions still needing follow-up this month.
+    // Booked rows (categorized, awaiting bank match) need no follow-up but are
+    // counted separately so the banner can say the month isn't final yet. ---
     const monthTransactions = transactions.filter(t => t.month === selectedMonth);
     const unreconciledCount = monthTransactions.filter(t => !isHandled(t)).length;
+    const bookedCount = monthTransactions.filter(t => reconcileState(t) === 'booked').length;
 
     // --- Budget vs Actual (read-only context, computed budget-wide) ---
     // Items whose def or category is flagged "utenfor statistikk" are kept out
@@ -114,8 +115,15 @@ export default function Forbruk() {
             ) : (
                 <div className="flex items-center gap-3 p-4 rounded-xl border bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
                     <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
-                    <div className="font-semibold text-green-800 dark:text-green-200">
-                        Alt avstemt for {formatMonth(selectedMonth)} — forbruket er koblet til budsjettpostene.
+                    <div>
+                        <div className="font-semibold text-green-800 dark:text-green-200">
+                            Alt håndtert for {formatMonth(selectedMonth)} — forbruket er koblet til budsjettpostene.
+                        </div>
+                        {bookedCount > 0 && (
+                            <div className="text-sm text-green-700 dark:text-green-300">
+                                {bookedCount} {bookedCount === 1 ? 'bokført transaksjon venter' : 'bokførte transaksjoner venter'} på avstemming mot banken — beløpene bekreftes ved neste bankimport.
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

@@ -9,6 +9,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
 import MergeTransactionsModal from './MergeTransactionsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
+import { isHandled, reconcileState } from '../../utils/reconciliation';
 
 /**
  * Reusable transaction engine: month navigation, summary, account filter,
@@ -51,11 +52,9 @@ export default function TransactionsPanel({
         setSelectedMonth(`${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`);
     };
 
-    // A transaction is "handled" if the user reconciled it OR it is already
-    // linked to a budget item. The companion app writes transactions with a
-    // budgetItemId but reconciled:false — those are categorized continuously
-    // and should not be flagged as needing follow-up.
-    const isHandled = (t) => t.reconciled || !!t.budgetItemId;
+    // Three states (see utils/reconciliation.js): avstemt = matched against
+    // the bank, bokført = categorized but awaiting the bank copy (companion
+    // app), uavstemt = needs follow-up. Booked rows need no follow-up.
 
     const creditCardIds = new Set(accounts.filter(a => a.type === 'Kredittkort').map(a => a.id));
     const accountNameById = new Map(accounts.map(a => [a.id, a.name]));
@@ -71,6 +70,7 @@ export default function TransactionsPanel({
         { key: 'manual', label: 'Manuell/CSV', Icon: Upload, test: (t) => !t.source },
         { key: 'creditcard', label: 'Kredittkort', Icon: CreditCard, test: (t) => creditCardIds.has(t.accountId) },
         { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t) },
+        { key: 'booked', label: 'Venter avstemming', Icon: null, test: (t) => reconcileState(t) === 'booked' },
         { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy },
         { key: 'receipt', label: 'Kvittering', Icon: ReceiptText, test: (t) => !!t.receiptId || receipts.some(r => r.transactionId === t.id) },
     ];
@@ -381,9 +381,11 @@ export default function TransactionsPanel({
                                                         <ReceiptText className="w-3 h-3 flex-shrink-0" />Kvittering
                                                     </span>
                                                 )}
-                                                {isHandled(trans)
+                                                {reconcileState(trans) === 'reconciled'
                                                     ? <span className="text-green-600 dark:text-green-400">✓ Avstemt</span>
-                                                    : <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider">Uavstemt</span>}
+                                                    : reconcileState(trans) === 'booked'
+                                                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-bold uppercase tracking-wider" title="Bokført, men ikke matchet mot en banktransaksjon ennå — avstemmes når bankens kopi kommer inn via import">Bokført</span>
+                                                        : <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider">Uavstemt</span>}
                                             </div>
                                             {trans.comment && (
                                                 <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 italic">💬 {trans.comment}</div>

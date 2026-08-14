@@ -5,6 +5,8 @@ import AddBudgetItemModal from '../budget/AddBudgetItemModal';
 import TransactionReceipt from './TransactionReceipt';
 import InfoTip from '../common/InfoTip';
 import { findBudgetItemSuggestion } from '../../utils/textMatch';
+import { FOREIGN_CURRENCIES } from '../../utils/currency';
+import { reconcilesOnLink } from '../../utils/reconciliation';
 import clsx from 'clsx';
 
 export default function ReconcileTransactionsModal({ isOpen, onClose, transactions, onComplete }) {
@@ -31,6 +33,9 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const [refundMode, setRefundMode] = useState(false);
     const [refundSearch, setRefundSearch] = useState('');
     const [selectedRefundId, setSelectedRefundId] = useState('');
+    // '' = NOK. Saved immediately on change (like the date), so the flag can be
+    // set retroactively on foreign purchases logged before currency detection.
+    const [currency, setCurrency] = useState('');
 
     const suggestions = useMemo(() => {
         const map = {};
@@ -72,6 +77,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setRefundMode(false);
         setRefundSearch('');
         setSelectedRefundId(currentTransaction?.refundOfTransactionId || '');
+        setCurrency(currentTransaction?.currency && currentTransaction.currency !== 'NOK' ? currentTransaction.currency : '');
         // Default the budget to the account's default (overridable). For an
         // already-reconciled transaction, keep its stored budget so a prior
         // override isn't lost.
@@ -146,7 +152,11 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             await updateTransaction(currentTransaction.id, {
                 budgetId: selectedBudgetId,
                 budgetItemId: instId,
-                reconciled: true,
+                // Bank rows (SB1/CSV) are the bank's own record, so linking them
+                // reconciles them. Self-reported rows (companion app/MCP) and
+                // foreign-currency rows stay "bokført" until the bank copy
+                // confirms the amount. `currency` state is fresher than the prop.
+                reconciled: reconcilesOnLink({ ...currentTransaction, currency: currency || null }),
                 isUnnecessary, excludeFromSharedCalc,
                 coveredByAccountId: excludeFromSharedCalc ? (coveredByAccountId || null) : null,
                 projectId: selectedProjectId || null,
@@ -171,7 +181,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         await updateTransaction(currentTransaction.id, {
             budgetId: selectedBudgetId,
             budgetItemId: instId,
-            reconciled: true,
+            reconciled: reconcilesOnLink({ ...currentTransaction, currency: currency || null }),
             isUnnecessary, excludeFromSharedCalc,
             projectId: selectedProjectId || null,
             projectSubcategory: selectedProjectId ? (selectedProjectSubcategory || null) : null,
@@ -203,7 +213,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         if (!original) return;
         try {
             await updateTransaction(currentTransaction.id, {
-                reconciled: true,
+                reconciled: reconcilesOnLink(currentTransaction),
                 isRefund: true,
                 refundOfTransactionId: original.id,
                 budgetId: original.budgetId || selectedBudgetId,
@@ -225,6 +235,18 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     };
     const handleUnlinkedRefund = () => markAs({ category: 'Retur', isRefund: true });
 
+    const handleChangeCurrency = async (value) => {
+        const prev = currency;
+        setCurrency(value);
+        try {
+            await updateTransaction(currentTransaction.id, { currency: value || null });
+        } catch (error) {
+            console.error("Failed to update currency", error);
+            setCurrency(prev);
+            alert("Kunne ikke oppdatere valuta.");
+        }
+    };
+
     const handleSaveDate = async () => {
         if (!tempDate) return;
         try {
@@ -242,7 +264,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         try {
             await Promise.all(remainingWithSuggestions.map(t => updateTransaction(t.id, {
                 budgetItemId: suggestions[t.id].budgetItemId,
-                reconciled: true,
+                reconciled: reconcilesOnLink(t),
             })));
             advance(remainingWithSuggestions.map(t => t.id));
         } catch (error) {
@@ -291,8 +313,22 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                             </div>
                             <div className="text-right">
                                 <span className={clsx("text-2xl font-bold", currentTransaction.type === 'income' ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
-                                    {currentTransaction.type === 'income' ? '+' : '-'}{currentTransaction.amount.toLocaleString('no-NO')} kr
+                                    {currentTransaction.type === 'income' ? '+' : '-'}{currentTransaction.amount.toLocaleString('no-NO')} {currency || 'kr'}
                                 </span>
+                                <select
+                                    value={currency}
+                                    onChange={(e) => handleChangeCurrency(e.target.value)}
+                                    title="Valuta beløpet ble betalt i. Sett f.eks. SEK på utenlandskjøp logget før valutastøtten, så foreslår bankimporten koblingen til NOK-beløpet."
+                                    className="block ml-auto mt-1 text-xs px-2 py-1 border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-400 outline-none"
+                                >
+                                    <option value="">NOK (kr)</option>
+                                    {FOREIGN_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                {currency && (
+                                    <p className="text-[11px] text-sky-600 dark:text-sky-400 mt-1 max-w-[160px] ml-auto">
+                                        Omtrentlig beløp — bankimporten foreslår kobling til NOK-beløpet
+                                    </p>
+                                )}
                             </div>
                         </div>
 

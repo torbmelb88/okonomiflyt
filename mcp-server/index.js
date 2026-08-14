@@ -285,6 +285,9 @@ function buildServer() {
             accountId,
             budgetId: resolvedBudgetId,
             type: type || 'expense',
+            // Self-reported like the companion app: booked once categorized,
+            // avstemt only when the bank's copy arrives and is merged.
+            source: 'mcp',
             reconciled: false,
             createdAt: new Date().toISOString(),
             ...(category && { category }),

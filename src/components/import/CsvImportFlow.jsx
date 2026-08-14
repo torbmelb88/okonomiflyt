@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
 import { stringsAreSimilar } from '../../utils/textMatch';
+import { fxPlausible } from '../../utils/currency';
 import ImportCSVModal from '../accounts/ImportCSVModal';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
 import DuplicateReviewModal from '../accounts/DuplicateReviewModal';
@@ -81,11 +82,25 @@ export default function CsvImportFlow({ isOpen, onClose, accounts, selectedMonth
         let mergedCount = 0;
         for (const merge of merges) {
             try {
+                // Merging onto a foreign-currency copy (companion app abroad):
+                // the bank's NOK amount takes over, the foreign amount is kept
+                // as originalAmount/-Currency and the currency flag cleared.
+                const wasForeign = merge.existing.currency && merge.existing.currency !== 'NOK';
                 await updateTransaction(merge.existing.id, {
                     date: merge.new.date,
                     amount: merge.new.amount,
                     name: merge.new.name,
-                    reconciled: true,
+                    // Bank match confirmed — avstemt if the row is also
+                    // categorized; otherwise it still needs a budget item.
+                    // The survivor takes over the bank row's identity, so it
+                    // no longer counts as self-reported (companion app).
+                    reconciled: !!(merge.existing.reconciled || merge.existing.budgetItemId),
+                    source: null,
+                    ...(wasForeign ? {
+                        currency: null,
+                        originalAmount: merge.existing.amount,
+                        originalCurrency: merge.existing.currency,
+                    } : {}),
                 });
                 mergedCount++;
             } catch (err) {
@@ -125,6 +140,7 @@ export default function CsvImportFlow({ isOpen, onClose, accounts, selectedMonth
                 complete: async (results) => {
                     let newTransactions = [];
                     let potentialDuplicatesList = [];
+                    let fxClaimedIds = new Set();
                     let skippedReport = [];
                     let mergedCount = 0;
                     let skippedCount = 0;
@@ -284,14 +300,36 @@ export default function CsvImportFlow({ isOpen, onClose, accounts, selectedMonth
                                 accountId,
                             };
 
+                            // Foreign purchase logged by the companion app (amount in
+                            // SEK/EUR/…): close date and a NOK/foreign ratio inside a
+                            // plausible exchange-rate band. Goes through the same review
+                            // as duplicates — "Knytt sammen" replaces the foreign amount
+                            // with the bank's NOK amount.
+                            const fxCandidate = !duplicate && existingAccountTransactions.find(t =>
+                                t.currency && t.currency !== 'NOK' &&
+                                !fxClaimedIds.has(t.id) &&
+                                t.type === type &&
+                                datesAreClose(t.date, date, 5) &&
+                                fxPlausible(t.currency, t.amount, Math.abs(amount))
+                            );
+
                             if (duplicate) {
                                 if (comment && !duplicate.name.includes(comment)) {
                                     const newName = `${duplicate.name} (${comment})`;
-                                    await updateTransaction(duplicate.id, { name: newName });
+                                    // Auto-merge with the bank row = bank match:
+                                    // avstemt if the row is also categorized
+                                    await updateTransaction(duplicate.id, {
+                                        name: newName,
+                                        reconciled: !!(duplicate.reconciled || duplicate.budgetItemId),
+                                        source: null,
+                                    });
                                     mergedCount++;
                                 } else {
                                     potentialDuplicatesList.push({ new: newTransactionObj, existing: duplicate });
                                 }
+                            } else if (fxCandidate) {
+                                fxClaimedIds.add(fxCandidate.id);
+                                potentialDuplicatesList.push({ new: newTransactionObj, existing: fxCandidate });
                             } else {
                                 newTransactions.push(newTransactionObj);
                             }
