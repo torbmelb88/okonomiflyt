@@ -3,6 +3,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/firebase';
 import { ArrowRight, Wallet, CreditCard, PiggyBank, Calculator, Info, Landmark } from 'lucide-react';
+import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 
 export default function MyOverview() {
     const { activeBudget, budgets, transactions, accounts } = useBudget();
@@ -160,7 +161,17 @@ export default function MyOverview() {
             .reduce((sum, t) => sum + (t.type === 'income' ? -t.amount : t.amount), 0);
     }, [transactions, prevMonthStr, accounts, activeBudget]);
 
-    const totalToJointAccount = sharedShareAmount + creditCardUsage;
+    // Buffer build-up on the shared bill account (plan made on Oppgjør): my
+    // equal share of the monthly extra rides on top of the settlement transfer.
+    const bufferContribution = useMemo(() => {
+        const sharedBudget = budgets.find(b => b.type === 'shared');
+        if (!sharedBudget) return 0;
+        const parties = sharedBudget.members?.length || 2;
+        const bufferAccounts = accounts.filter(a => a.isBillAccount && a.bufferTarget > 0 && (a.defaultBudgetId || a.budgetId) === sharedBudget.id);
+        return totalBufferContributionPerParty(bufferAccounts, prevMonthStr, parties);
+    }, [budgets, accounts, prevMonthStr]);
+
+    const totalToJointAccount = sharedShareAmount + creditCardUsage + bufferContribution;
 
     // 3. Savings — actual transactions marked «Sparing» this month. Only the
     // outgoing transfer leg (expense) counts; incoming legs on the savings
@@ -292,6 +303,12 @@ export default function MyOverview() {
                                     <span className="text-gray-600 dark:text-gray-400">Kredittkort ({formatMonth(prevMonthStr)})</span>
                                     <span className="font-medium text-gray-900 dark:text-white">{creditCardUsage.toLocaleString('no-NO')} kr</span>
                                 </div>
+                                {bufferContribution > 0 && (
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><PiggyBank className="w-3.5 h-3.5 text-purple-500" /> Bufferoppbygging regningskonto</span>
+                                        <span className="font-medium text-gray-900 dark:text-white">{bufferContribution.toLocaleString('no-NO')} kr</span>
+                                    </div>
+                                )}
                                 <div className="h-px bg-gray-100 dark:bg-gray-700 my-2"></div>
                             </div>
 
@@ -405,7 +422,7 @@ export default function MyOverview() {
                     <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
                         <h4 className="font-bold text-gray-900 dark:text-white mb-2">Tips</h4>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
-                            Summen "Til Felleskonto" inkluderer din *faktiske* andel av fellesutgiftene fra forrige måned ({sharedShareAmount.toLocaleString('no-NO')} kr) pluss ditt private kredittkortforbruk som nå forfaller ({creditCardUsage.toLocaleString('no-NO')} kr).
+                            Summen "Til Felleskonto" inkluderer din *faktiske* andel av fellesutgiftene fra forrige måned ({sharedShareAmount.toLocaleString('no-NO')} kr) pluss ditt private kredittkortforbruk som nå forfaller ({creditCardUsage.toLocaleString('no-NO')} kr){bufferContribution > 0 ? ` og din del av bufferoppbyggingen på regningskontoen (${bufferContribution.toLocaleString('no-NO')} kr, avtalt på Oppgjør)` : ''}.
                         </p>
                     </div>
 

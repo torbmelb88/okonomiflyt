@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, CreditCard, Building, Wallet, Share2 } from 'lucide-react';
+import { X, CreditCard, Building, Wallet, Share2, PiggyBank } from 'lucide-react';
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
 
@@ -12,6 +12,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
     const [defaultBudgetId, setDefaultBudgetId] = useState('');
     const [excludeFromSharedCalc, setExcludeFromSharedCalc] = useState(false);
     const [isBillAccount, setIsBillAccount] = useState(false);
+    const [bufferTarget, setBufferTarget] = useState('');
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -23,6 +24,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
             setDefaultBudgetId(accountToEdit.defaultBudgetId || accountToEdit.budgetId || activeBudget?.id || '');
             setExcludeFromSharedCalc(!!accountToEdit.excludeFromSharedCalc);
             setIsBillAccount(!!accountToEdit.isBillAccount);
+            setBufferTarget(accountToEdit.bufferTarget ? String(accountToEdit.bufferTarget) : '');
         } else if (isOpen && !accountToEdit) {
             // Reset if opening for new account
             setName('');
@@ -32,6 +34,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
             setDefaultBudgetId(activeBudget?.id || budgets[0]?.id || '');
             setExcludeFromSharedCalc(false);
             setIsBillAccount(false);
+            setBufferTarget('');
         }
     }, [isOpen, accountToEdit, defaultType, activeBudget, budgets]);
 
@@ -50,7 +53,9 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
                 cardNickname: cardNickname.trim(),
                 defaultBudgetId,
                 excludeFromSharedCalc,
-                isBillAccount
+                isBillAccount,
+                // Buffer target only makes sense on a bill account
+                bufferTarget: isBillAccount && parseFloat(bufferTarget) > 0 ? Math.round(parseFloat(bufferTarget)) : null,
             });
             onClose();
         } catch (error) {
@@ -194,6 +199,27 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
                             <span className="block text-xs text-gray-500 dark:text-gray-400">Fylles på med forrige måneds forbruk. Min Oversikt viser beløpet som skal overføres hit (kontoens standard-budsjett avgjør hvem sin oversikt).</span>
                         </span>
                     </label>
+
+                    {isBillAccount && (
+                        <div className="ml-6 -mt-2 space-y-1">
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                                <PiggyBank className="w-4 h-4 text-gray-400" /> Ønsket buffer (kr)
+                            </label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="100"
+                                inputMode="numeric"
+                                value={bufferTarget}
+                                onChange={(e) => setBufferTarget(e.target.value)}
+                                placeholder="f.eks. 20000"
+                                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none dark:bg-gray-700 dark:text-white"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                Så mye bør stå på kontoen ut over månedens påfyll, slik at regninger som forfaller før neste påfyll (f.eks. kortfaktura) alltid er dekket. Sammenlignes med saldoen fra banken på Oppgjør-siden, der du også kan lage en plan for å spare den opp.
+                            </p>
+                        </div>
+                    )}
 
                     <div className="flex justify-end space-x-3 pt-4">
                         <button

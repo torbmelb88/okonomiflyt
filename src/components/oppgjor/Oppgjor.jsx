@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useBudget } from '../../contexts/BudgetContext';
-import { ArrowRight, Scale, Loader2 } from 'lucide-react';
+import { ArrowRight, Scale, Loader2, PiggyBank } from 'lucide-react';
 import { api } from '../../services/firebase';
+import BufferCard from './BufferCard';
+import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 
 /**
  * Oppgjør = settlement. Household-level, identical regardless of which budget is
@@ -32,7 +34,18 @@ export default function Oppgjor() {
     const changeMonth = (delta) => { const [y, mo] = selectedMonth.split('-').map(Number); const d = new Date(y, mo - 1 + delta); setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); };
     const accountName = (id) => accounts.find(a => a.id === id)?.name || 'Konto';
 
-    const sharedBudget = budgets.find(b => b.type === 'shared');
+    const sharedBudget = useMemo(() => budgets.find(b => b.type === 'shared'), [budgets]);
+
+    // Buffer on the shared bill account(s): target vs. balance, and the
+    // build-up plan whose equal per-party extra rides on top of the settlement.
+    const parties = sharedBudget?.members?.length || 2;
+    const bufferAccounts = useMemo(
+        () => sharedBudget
+            ? accounts.filter(a => a.isBillAccount && a.bufferTarget > 0 && (a.defaultBudgetId || a.budgetId) === sharedBudget.id)
+            : [],
+        [accounts, sharedBudget]
+    );
+    const bufferPerParty = totalBufferContributionPerParty(bufferAccounts, selectedMonth, parties);
 
     const split = useMemo(() => {
         if (!allTx || !sharedBudget) return null;
@@ -109,13 +122,15 @@ export default function Oppgjor() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-800">
                                     <div className="text-sm text-gray-600 dark:text-gray-400">Du betaler ({(split.userShare * 100).toFixed(0)}%)</div>
-                                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{split.userAmount.toLocaleString('no-NO')} kr</div>
+                                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{(split.userAmount + bufferPerParty).toLocaleString('no-NO')} kr</div>
                                     {split.utleggSelf > 0 && <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">Inkl. dine utlegg −{split.utleggSelf.toLocaleString('no-NO')} kr</div>}
+                                    {bufferPerParty > 0 && <div className="text-xs text-purple-700 dark:text-purple-300 mt-1 flex items-center gap-1"><PiggyBank className="w-3 h-3" /> Inkl. bufferoppbygging +{bufferPerParty.toLocaleString('no-NO')} kr</div>}
                                 </div>
                                 <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-800">
                                     <div className="text-sm text-gray-600 dark:text-gray-400">Partner betaler ({(split.partnerShare * 100).toFixed(0)}%)</div>
-                                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{split.partnerAmount.toLocaleString('no-NO')} kr</div>
+                                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{(split.partnerAmount + bufferPerParty).toLocaleString('no-NO')} kr</div>
                                     {split.utleggPartner > 0 && <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">Inkl. partners utlegg −{split.utleggPartner.toLocaleString('no-NO')} kr</div>}
+                                    {bufferPerParty > 0 && <div className="text-xs text-purple-700 dark:text-purple-300 mt-1 flex items-center gap-1"><PiggyBank className="w-3 h-3" /> Inkl. bufferoppbygging +{bufferPerParty.toLocaleString('no-NO')} kr</div>}
                                 </div>
                             </div>
                             <div className="flex justify-between items-center text-sm pt-4 mt-4 border-t border-gray-100 dark:border-gray-700">
@@ -128,6 +143,11 @@ export default function Oppgjor() {
                             Ingen fellesbudsjett funnet — fordelingen vises når du har et felles budsjett.
                         </div>
                     )}
+
+                    {/* Buffer på felles regningskonto */}
+                    {bufferAccounts.map(a => (
+                        <BufferCard key={a.id} account={a} parties={parties} settlementMonth={selectedMonth} />
+                    ))}
 
                     {/* Dekkes fra andre kontoer */}
                     {coveredFromList.length > 0 && (

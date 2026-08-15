@@ -1,5 +1,6 @@
-import { CreditCard, Plus, Edit2, Trash2, Wallet } from 'lucide-react';
+import { CreditCard, Plus, Edit2, Trash2, Wallet, PiggyBank } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
+import { bufferBalanceFor } from '../../utils/bufferPlan';
 
 /**
  * Grid of account cards with add/edit/delete. Accounts are global; each shows
@@ -35,6 +36,21 @@ export default function AccountGrid({ accounts, onAdd, onEdit, onDelete, addLabe
                                     )}
                                 </div>
                             ) : null;
+                        })()}
+
+                        {account.isBillAccount && account.bufferTarget > 0 && (() => {
+                            const bal = bufferBalanceFor(account, bankBalances);
+                            const short = bal == null ? null : Math.max(0, Math.ceil(account.bufferTarget - bal));
+                            const ok = short === 0;
+                            return (
+                                <div className={`mt-1 flex items-center gap-1 text-xs ${ok ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                    <PiggyBank className="w-3 h-3" />
+                                    <span>
+                                        Buffer {account.bufferTarget.toLocaleString('no-NO')} kr
+                                        {short == null ? '' : ok ? ' · på plass' : ` · mangler ${short.toLocaleString('no-NO')} kr`}
+                                    </span>
+                                </div>
+                            );
                         })()}
 
                         {(account.cardLastFour || account.cardNickname) && (
