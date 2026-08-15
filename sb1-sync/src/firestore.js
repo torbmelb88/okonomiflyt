@@ -39,6 +39,36 @@ export async function upsertAccounts(database, collectionName, accounts) {
     return n;
 }
 
+/**
+ * One balance snapshot per account per (Oslo) day, keyed `<accountKey>_<date>`
+ * so re-runs on the same day overwrite rather than duplicate. `sb1Accounts`
+ * only holds the latest balance; this history is what lets the app look back
+ * at e.g. the balance the day before the monthly top-up (the buffer's real
+ * low point) or the lowest balance in a month.
+ */
+export async function upsertBalanceSnapshots(database, collectionName, accounts, date) {
+    const stampedAt = new Date().toISOString();
+    const batch = database.batch();
+    let n = 0;
+    for (const a of accounts) {
+        const key = String(a.sb1AccountKey || '').replace(/\//g, '_');
+        if (!key) continue;
+        batch.set(database.collection(collectionName).doc(`${key}_${date}`), {
+            sb1AccountKey: a.sb1AccountKey,
+            accountNumber: a.accountNumber ?? null,
+            name: a.name ?? null,
+            date,
+            balance: a.balance ?? null,
+            availableBalance: a.availableBalance ?? null,
+            currency: a.currency ?? null,
+            syncedAt: stampedAt,
+        }, { merge: true });
+        n++;
+    }
+    if (n) await batch.commit();
+    return n;
+}
+
 export async function upsertTransactions(database, collectionName, txs, syncedAt) {
     const stampedAt = syncedAt || new Date().toISOString();
     let written = 0;

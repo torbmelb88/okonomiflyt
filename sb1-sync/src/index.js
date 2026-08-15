@@ -5,7 +5,7 @@ import cron from 'node-cron';
 import { getAccessToken } from './auth.js';
 import { fetchAccounts, fetchTransactions, fetchClassifiedTransactions } from './sb1.js';
 import { normalizeTransaction, normalizeAccount } from './normalize.js';
-import { initFirestore, upsertTransactions, upsertAccounts, pruneStaleTransactions } from './firestore.js';
+import { initFirestore, upsertTransactions, upsertAccounts, pruneStaleTransactions, upsertBalanceSnapshots } from './firestore.js';
 
 const config = {
   clientId: requireEnv('SB1_CLIENT_ID'),
@@ -21,6 +21,7 @@ const config = {
   saKeyPath: process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.SB1_SA_KEY_PATH || null,
   firestoreCollection: process.env.SB1_FIRESTORE_COLLECTION || 'sb1Transactions',
   accountsCollection: process.env.SB1_ACCOUNTS_COLLECTION || 'sb1Accounts',
+  balanceHistoryCollection: process.env.SB1_BALANCE_HISTORY_COLLECTION || 'sb1BalanceHistory',
 };
 
 function requireEnv(name) {
@@ -108,8 +109,12 @@ async function runOnce() {
       const pruned = await pruneStaleTransactions(db, config.firestoreCollection, { fromDate, toDate, syncedAt });
       if (pruned) console.log(`Ryddet bort ${pruned} foreldede rader (ikke lenger rapportert av banken).`);
     }
-    const accN = await upsertAccounts(db, config.accountsCollection, accounts.map(normalizeAccount));
+    const normalizedAccounts = accounts.map(normalizeAccount);
+    const accN = await upsertAccounts(db, config.accountsCollection, normalizedAccounts);
     console.log(`Upsertet ${accN} kontoer (m/ saldo) til «${config.accountsCollection}».`);
+    // Daily balance history — one doc per account per day (idempotent on re-run)
+    const snapN = await upsertBalanceSnapshots(db, config.balanceHistoryCollection, normalizedAccounts, osloDate(new Date()));
+    console.log(`Lagret ${snapN} saldo-øyeblikksbilder for ${osloDate(new Date())} i «${config.balanceHistoryCollection}».`);
   }
 
   return all.length;
