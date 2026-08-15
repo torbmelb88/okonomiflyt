@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
     Upload, ArrowDownLeft, ArrowUpRight, Edit2, Trash2, CheckCircle,
     Link2, FolderKanban, ReceiptText, ArrowRight, CreditCard,
-    MessageSquare, Smartphone, Landmark, ArrowUpDown, X, Undo2, Merge,
+    MessageSquare, Smartphone, Landmark, ArrowUpDown, X, Undo2, Merge, FileText,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
@@ -61,12 +61,14 @@ export default function TransactionsPanel({
     const panelTransactions = transactions;
 
     // Extra filters (AND-combined chips). "Manuell/CSV" = no source field:
-    // the companion app stamps source:'companion_app' and the SB1 import
-    // stamps source:'sb1'; everything else was entered by hand or CSV.
+    // the companion app stamps source:'companion_app', the SB1 import
+    // stamps source:'sb1' and the credit-card invoice import
+    // source:'trumf-invoice'; everything else was entered by hand or CSV.
     const extraFilters = [
         { key: 'comment', label: 'Kommentar', Icon: MessageSquare, test: (t) => !!t.comment },
         { key: 'companion', label: 'Companion-app', Icon: Smartphone, test: (t) => t.source === 'companion_app' },
         { key: 'sb1', label: 'Bank (SB1)', Icon: Landmark, test: (t) => t.source === 'sb1' },
+        { key: 'invoice', label: 'Kortfaktura', Icon: FileText, test: (t) => t.source === 'trumf-invoice' },
         { key: 'manual', label: 'Manuell/CSV', Icon: Upload, test: (t) => !t.source },
         { key: 'creditcard', label: 'Kredittkort', Icon: CreditCard, test: (t) => creditCardIds.has(t.accountId) },
         { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t) },

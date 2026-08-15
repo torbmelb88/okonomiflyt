@@ -10,7 +10,7 @@ export default function DuplicateReviewModal({ isOpen, onClose, duplicates, onCo
     const currentItem = duplicates[currentIndex];
     const isLast = currentIndex === duplicates.length - 1;
     // Currency pair: the existing copy was logged abroad in foreign currency,
-    // the CSV row is the bank's converted NOK amount — different numbers by design.
+    // the imported row (CSV/faktura) is the bank's converted NOK amount — different numbers by design.
     const existingCurrency = currentItem.existing.currency && currentItem.existing.currency !== 'NOK'
         ? currentItem.existing.currency : null;
 
@@ -61,7 +61,7 @@ export default function DuplicateReviewModal({ isOpen, onClose, duplicates, onCo
 
                         {/* New Transaction */}
                         <div className="bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 rounded-xl p-4 flex flex-col">
-                            <div className="text-xs font-bold text-green-700 dark:text-green-400 uppercase tracking-wider mb-2">Ny Transaksjon (CSV)</div>
+                            <div className="text-xs font-bold text-green-700 dark:text-green-400 uppercase tracking-wider mb-2">Ny transaksjon (import)</div>
                             <div className="flex-1">
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">{currentItem.new.name}</h3>
                                 <div className="text-sm text-gray-500 dark:text-gray-400 mb-3">{currentItem.new.date}</div>
