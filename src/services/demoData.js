@@ -70,10 +70,35 @@ export function createDemoDb() {
     const accounts = [
         { id: 'acc-bruks', name: 'Brukskonto', type: 'Bankkonto', defaultBudgetId: 'budget-personal', sb1AccountKey: 'demo-key-bruks', ownerId: demoUser.uid },
         { id: 'acc-regning', name: 'Regningskonto', type: 'Bankkonto', defaultBudgetId: 'budget-personal', isBillAccount: true, sb1AccountKey: 'demo-key-regning', ownerId: demoUser.uid },
-        { id: 'acc-felles', name: 'Felleskonto', type: 'Bankkonto', defaultBudgetId: 'budget-shared', sb1AccountKey: 'demo-key-felles', ownerId: demoUser.uid },
+        { id: 'acc-felles', name: 'Felleskonto', type: 'Bankkonto', defaultBudgetId: 'budget-shared', sb1AccountKey: 'demo-key-felles', isBillAccount: true, bufferTarget: 8000, ownerId: demoUser.uid },
         { id: 'acc-kort', name: 'Kredittkort', type: 'Kredittkort', defaultBudgetId: 'budget-personal', cardLastFour: '1234', sb1AccountKey: 'demo-key-kort', ownerId: demoUser.uid },
         { id: 'acc-sparing', name: 'Bufferkonto', type: 'Sparing', defaultBudgetId: 'budget-personal', sb1AccountKey: 'demo-key-sparing', ownerId: demoUser.uid }
     ];
+
+    // Daily balance snapshots for the joint bill account: topped up on the
+    // 21st, bills drain it through the month, bottoming out around the 20th —
+    // the pattern the buffer feature is built to expose. Deterministic.
+    const sb1BalanceHistory = [];
+    {
+        const today = new Date();
+        for (let back = 49; back >= 0; back--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - back);
+            const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const day = d.getDate();
+            // Cycle position: days since last top-up (21st)
+            const sinceTopup = (day - 21 + 31) % 31;
+            // Start ~26k after top-up, drain ~600/day, extra bill hits mid-cycle
+            let balance = 26000 - sinceTopup * 620 - (sinceTopup > 22 ? 1400 : 0);
+            // Previous month dips under the 8k target, current month stays over
+            if (d.getMonth() !== today.getMonth() && sinceTopup >= 28) balance -= 1250;
+            balance = Math.max(balance, 5800) + ((day * 37) % 90);
+            sb1BalanceHistory.push({
+                id: `hist-felles-${iso}`, sb1AccountKey: 'demo-key-felles', name: 'Felleskonto',
+                date: iso, balance: Math.round(balance * 100) / 100, availableBalance: Math.round(balance * 100) / 100, currency: 'NOK',
+            });
+        }
+    }
 
     const sb1Accounts = [
         { id: 'sb1-bruks', sb1AccountKey: 'demo-key-bruks', name: 'Brukskonto', accountNumber: '12345678903', balance: 18452.33 },
@@ -290,6 +315,7 @@ export function createDemoDb() {
         receipts,
         receiptItems,
         sb1Accounts,
-        sb1Transactions
+        sb1Transactions,
+        sb1BalanceHistory
     };
 }

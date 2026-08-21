@@ -62,3 +62,35 @@ export const bufferBalanceFor = (account, bankBalances) => {
     if (typeof b.balance === 'number') return b.balance;
     return null;
 };
+
+// --- Balance history (sb1BalanceHistory: one snapshot per account per day) ---
+
+const snapshotBalance = (s) =>
+    typeof s.availableBalance === 'number' ? s.availableBalance
+        : typeof s.balance === 'number' ? s.balance : null;
+
+// Normalizes raw history docs to sorted `{ date, balance }` points (oldest first).
+export const historyPoints = (docs) =>
+    (docs || [])
+        .map(d => ({ date: d.date, balance: snapshotBalance(d) }))
+        .filter(p => p.date && p.balance != null)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+/**
+ * The month's verdict for the buffer is its lowest balance — the level the
+ * account bottomed out at right before the monthly top-up, no agreed
+ * "measuring day" needed. Returns [{ month, low, date, days }] newest first.
+ */
+export const monthlyLows = (points) => {
+    const byMonth = new Map();
+    for (const p of points) {
+        const month = p.date.slice(0, 7);
+        const cur = byMonth.get(month);
+        if (!cur) byMonth.set(month, { month, low: p.balance, date: p.date, days: 1 });
+        else {
+            cur.days++;
+            if (p.balance < cur.low) { cur.low = p.balance; cur.date = p.date; }
+        }
+    }
+    return [...byMonth.values()].sort((a, b) => b.month.localeCompare(a.month));
+};

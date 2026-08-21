@@ -1,9 +1,14 @@
-import { useState } from 'react';
-import { PiggyBank, AlertTriangle, CheckCircle2, Landmark, X, Info } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { PiggyBank, AlertTriangle, CheckCircle2, Landmark, X, Info, TrendingDown } from 'lucide-react';
+import {
+    ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine,
+} from 'recharts';
 import { useBudget } from '../../contexts/BudgetContext';
+import { useTheme } from '../../contexts/ThemeContext';
+import { api } from '../../services/firebase';
 import {
     bufferBalanceFor, bufferContributionPerParty, makeBufferPlan,
-    planEndMonth, planMonthIndex, addMonths,
+    planEndMonth, planMonthIndex, addMonths, historyPoints, monthlyLows,
 } from '../../utils/bufferPlan';
 
 const kr = (n) => `${Math.round(n).toLocaleString('no-NO')} kr`;
@@ -23,9 +28,32 @@ const formatMonth = (m) => {
  */
 export default function BufferCard({ account, parties, settlementMonth }) {
     const { bankBalances, updateAccount } = useBudget();
+    const { theme } = useTheme();
     const [months, setMonths] = useState(3);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    // Daily balance snapshots from the sync (sb1BalanceHistory) — the month's
+    // lowest point is the buffer's real verdict, since the balance dips right
+    // before the monthly top-up and a single "today" number hides that.
+    const [history, setHistory] = useState(null);
+
+    useEffect(() => {
+        if (!account.sb1AccountKey) { setHistory([]); return; }
+        let cancelled = false;
+        (async () => {
+            try {
+                const docs = await api.queryCollection('sb1BalanceHistory', 'sb1AccountKey', account.sb1AccountKey);
+                if (!cancelled) setHistory(historyPoints(docs));
+            } catch (err) {
+                console.error('Could not load balance history', err);
+                if (!cancelled) setHistory([]);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [account.sb1AccountKey]);
+
+    const chartPoints = useMemo(() => (history || []).slice(-92), [history]);
+    const lows = useMemo(() => monthlyLows(history || []), [history]);
 
     const target = account.bufferTarget || 0;
     const balance = bufferBalanceFor(account, bankBalances);
@@ -163,6 +191,72 @@ export default function BufferCard({ account, parties, settlementMonth }) {
             ))}
 
             {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+
+            {/* Historikk: daglig saldo mot mål, og laveste punkt per måned */}
+            {chartPoints.length >= 2 && (
+                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center gap-2 mb-3">
+                        <TrendingDown className="w-4 h-4 text-gray-400" />
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Saldo dag for dag</h4>
+                        <span className="text-xs text-gray-400">mot buffermålet — bunnpunktet rett før påfyll er fasiten</span>
+                    </div>
+                    <div className="h-44">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={chartPoints} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} vertical={false} />
+                                <XAxis
+                                    dataKey="date"
+                                    fontSize={11}
+                                    tickLine={false}
+                                    tickFormatter={(d) => `${d.slice(8, 10)}.${d.slice(5, 7)}`}
+                                    minTickGap={28}
+                                    stroke="#9ca3af"
+                                />
+                                <YAxis
+                                    fontSize={11}
+                                    tickLine={false}
+                                    width={52}
+                                    domain={[0, 'auto']}
+                                    tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}k` : v}
+                                    stroke="#9ca3af"
+                                />
+                                <Tooltip
+                                    formatter={(value) => [kr(value), 'Saldo']}
+                                    labelFormatter={(d) => `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}`}
+                                    contentStyle={theme === 'dark'
+                                        ? { backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6' }
+                                        : { borderRadius: 8 }}
+                                    labelStyle={theme === 'dark' ? { color: '#f3f4f6' } : undefined}
+                                />
+                                <ReferenceLine
+                                    y={target}
+                                    stroke="#f59e0b"
+                                    strokeDasharray="6 4"
+                                    label={{ value: 'Mål', position: 'insideTopRight', fontSize: 11, fill: '#f59e0b' }}
+                                />
+                                <Line type="monotone" dataKey="balance" stroke="#3b82f6" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+
+                    {lows.length > 0 && (
+                        <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {lows.slice(0, 3).map(m => {
+                                const met = m.low >= target;
+                                return (
+                                    <div key={m.month} className={`rounded-lg border p-2.5 text-sm ${met ? 'border-green-100 dark:border-green-900 bg-green-50/60 dark:bg-green-900/15' : 'border-amber-100 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-900/15'}`}>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">{formatMonth(m.month)}{m.days < 15 ? ' (delvis)' : ''}</div>
+                                        <div className="font-semibold text-gray-900 dark:text-gray-100">Lavest {kr(m.low)}</div>
+                                        <div className={`text-xs ${met ? 'text-green-700 dark:text-green-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                                            {met ? `${kr(m.low - target)} over målet` : `${kr(target - m.low)} under målet`} · {m.date.slice(8, 10)}.{m.date.slice(5, 7)}.
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
