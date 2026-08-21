@@ -417,8 +417,7 @@ function timingSafeMatch(a, b) {
     return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
 }
 
-function isAuthorized(req) {
-    const secret = process.env.MCP_SECRET;
+function isAuthorized(req, secret) {
     if (!secret || secret === 'change-me') return false;
 
     const bearer = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
@@ -446,7 +445,7 @@ export const mcp = onRequest({
         return;
     }
 
-    if (!isAuthorized(req)) {
+    if (!isAuthorized(req, process.env.MCP_SECRET)) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
     }
@@ -481,5 +480,140 @@ export const mcp = onRequest({
                 id: null,
             });
         }
+    }
+});
+
+// ---------- settlement (oppgjør) helpers ----------
+// Mirrors src/utils/bufferPlan.js — the buffer build-up plan's equal per-party
+// extra that rides on top of the settlement. Kept in sync by hand; the plan
+// shape is account.bufferPlan { startMonth, months, monthlyTotal }.
+
+function planCoversMonth(plan, month) {
+    if (!plan || !plan.startMonth || !plan.months || !month) return false;
+    const [sy, sm] = plan.startMonth.split('-').map(Number);
+    const [y, m] = month.split('-').map(Number);
+    const idx = (y - sy) * 12 + (m - sm);
+    return idx >= 0 && idx < plan.months;
+}
+
+function bufferContributionPerParty(plan, month, parties) {
+    if (!planCoversMonth(plan, month)) return 0;
+    return Math.ceil((plan.monthlyTotal || 0) / Math.max(1, parties || 2));
+}
+
+// Mirrors the split in src/components/oppgjor/Oppgjor.jsx: per-person
+// settlement for one month. "owner" is the budget's owner member (the app's
+// "Du"); with 5050/custom splits the uid never matters. The app's roundingMode
+// lives in browser localStorage, so it is a constant here — 100 (round up to
+// the nearest hundred), verified against the app 2026-08-21.
+const ROUNDING_MODE = 100;
+
+function computeOppgjor({ shared, accounts, txs, month }) {
+    const members = shared.members || [];
+    const owner = members.find(m => m.role === 'owner') || members[0] || null;
+    const partner = members.find(m => m !== owner) || null;
+    const parties = members.length || 2;
+
+    const excludedAccounts = new Set(accounts.filter(a => a.excludeFromSharedCalc).map(a => a.id));
+    const splitTx = txs.filter(t => t.budgetItemId && !t.excludeFromSharedCalc && !excludedAccounts.has(t.accountId));
+    const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
+    const totalSharedActual = sum(splitTx.filter(t => !t.payer || t.payer === 'shared'));
+    const selfActual = sum(splitTx.filter(t => t.payer === 'self'));
+    const partnerActual = sum(splitTx.filter(t => t.payer === 'partner'));
+    const utleggSelf = sum(splitTx.filter(t => t.paidPrivatelyBy === 'self'));
+    const utleggPartner = sum(splitTx.filter(t => t.paidPrivatelyBy === 'partner'));
+
+    let userShare = 0.5;
+    const method = shared.splitMethod || 'income';
+    if (method === 'custom') userShare = (shared.customUserShare || 50) / 100;
+    else if (method !== '5050') {
+        const totalIncome = members.reduce((s, m) => s + (m.income || 0), 0);
+        userShare = totalIncome > 0 ? (owner?.income || 0) / totalIncome : 0.5;
+    }
+
+    const bufferAccounts = accounts.filter(a =>
+        a.isBillAccount && a.bufferTarget > 0 && (a.defaultBudgetId || a.budgetId) === shared.id
+    );
+    const bufferPerParty = bufferAccounts.reduce(
+        (s, a) => s + bufferContributionPerParty(a.bufferPlan, month, parties), 0
+    );
+
+    const rawUser = totalSharedActual * userShare + selfActual - utleggSelf;
+    const rawPartner = totalSharedActual * (1 - userShare) + partnerActual - utleggPartner;
+    const roundAmount = (raw) => ROUNDING_MODE > 1
+        ? Math.ceil(raw / ROUNDING_MODE) * ROUNDING_MODE
+        : Math.round(raw);
+
+    return {
+        month,
+        splitMethod: method,
+        owner: { name: owner?.name || null, amount: roundAmount(rawUser) + bufferPerParty },
+        partner: { name: partner?.name || null, amount: roundAmount(rawPartner) + bufferPerParty },
+        bufferPerParty,
+        utleggOwner: Math.round(utleggSelf * 100) / 100,
+        utleggPartner: Math.round(utleggPartner * 100) / 100,
+        totalSharedConsumption: Math.round((totalSharedActual + selfActual + partnerActual) * 100) / 100,
+    };
+}
+
+// ---------- Home Assistant feed ----------
+//
+// Read-only JSON for Home Assistant's RESTful integration (`rest:`): one GET
+// returns every number HA exposes as sensors. Extending the integration means
+// adding a field here plus a sensor block in HA — nothing else.
+// Numbers mirror get_month_summary: a budget line's actual is the sum of its
+// transactions, with refunds (income on the line) deducted.
+
+export const ha = onRequest({
+    region: 'europe-west1',
+    invoker: 'public',
+    maxInstances: 2,
+    memory: '256MiB',
+}, async (req, res) => {
+    if (!isAuthorized(req, process.env.HA_SECRET)) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    if (req.method !== 'GET') {
+        res.status(405).json({ error: 'Method not allowed — use GET.' });
+        return;
+    }
+
+    try {
+        const month = osloToday().slice(0, 7);
+        const [budgets, expenses, accounts] = await Promise.all([
+            getCollection('budgets'),
+            getCollection('expenses'),
+            getCollection('accounts'),
+        ]);
+        const shared = budgets.find(b => b.type === 'shared');
+        if (!shared) {
+            res.status(500).json({ error: 'No shared budget found.' });
+            return;
+        }
+
+        const txs = await queryEq('transactions', { month, budgetId: shared.id });
+        const lineActual = (name) => {
+            const line = expenses.find(e =>
+                e.budgetId === shared.id && (e.name || '').trim().toLowerCase() === name
+            );
+            if (!line) return null;
+            const actual = txs.filter(t => t.budgetItemId === line.id)
+                .reduce((acc, t) => acc + (t.type === 'income' ? -t.amount : t.amount), 0);
+            return Math.round(actual * 100) / 100;
+        };
+
+        res.json({
+            generatedAt: new Date().toISOString(),
+            month,
+            shared: {
+                budget: shared.name,
+                dagligvarer: lineActual('dagligvarer'),
+            },
+            oppgjor: computeOppgjor({ shared, accounts, txs, month }),
+        });
+    } catch (err) {
+        console.error('HA feed failed:', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
     }
 });
