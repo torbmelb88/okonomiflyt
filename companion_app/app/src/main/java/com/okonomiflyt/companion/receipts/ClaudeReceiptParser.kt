@@ -1,5 +1,7 @@
 package com.okonomiflyt.companion.receipts
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Base64
 import android.util.Log
 import com.okonomiflyt.companion.BuildConfig
@@ -28,6 +30,10 @@ class ClaudeReceiptParser {
         private const val FALLBACK_MODEL = "claude-sonnet-4-6"
         // Line items must sum to the receipt total within this (øre rounding)
         private const val SUM_TOLERANCE = 0.05
+        // The API rejects images with any side over 8000 px (400 invalid_request_error)
+        private const val MAX_IMAGE_DIMENSION = 8000
+        // Recompress very large images to keep the request well under the API's size cap
+        private const val MAX_IMAGE_BYTES = 10_000_000
 
         // Fixed category set so spending statistics stay consistent across receipts
         val CATEGORIES = listOf(
@@ -101,14 +107,15 @@ Regler:
                     )
                 }
 
-                val mimeType = detectMime(fileBytes, mimeHint)
+                val detectedMime = detectMime(fileBytes, mimeHint)
                     ?: return@withContext Result.failure(
                         RuntimeException(
                             "Ukjent filtype (ikke PDF eller bilde). Mottatt mime: $mimeHint"
                         )
                     )
+                val (sendBytes, mimeType) = normalizeImage(fileBytes, detectedMime)
 
-                val base64Data = Base64.encodeToString(fileBytes, Base64.NO_WRAP)
+                val base64Data = Base64.encodeToString(sendBytes, Base64.NO_WRAP)
                 val fileBlock = JSONObject().apply {
                     put("type", if (mimeType == "application/pdf") "document" else "image")
                     put("source", JSONObject().apply {
@@ -236,7 +243,13 @@ Regler:
             val responseText = response.body?.string() ?: ""
             if (!response.isSuccessful) {
                 Log.e(TAG, "API error ${response.code}: $responseText")
-                throw RuntimeException("Claude API feilet (${response.code})")
+                val apiMessage = runCatching {
+                    JSONObject(responseText).getJSONObject("error").getString("message")
+                }.getOrNull()
+                throw RuntimeException(
+                    "Claude API feilet (${response.code})" +
+                        (apiMessage?.let { ": ${it.take(300)}" } ?: "")
+                )
             }
 
             val json = JSONObject(responseText)
@@ -257,6 +270,50 @@ Regler:
             }
             throw RuntimeException("Tomt svar fra modellen")
         }
+    }
+
+    /**
+     * The API rejects images with any side over 8000 px, which camera photos
+     * and long receipt scans can exceed. Downscales and recompresses such
+     * images; PDFs and already-acceptable images pass through untouched.
+     */
+    private fun normalizeImage(bytes: ByteArray, mimeType: String): Pair<ByteArray, String> {
+        if (mimeType == "application/pdf") return bytes to mimeType
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+        // Undecodable image: send as-is and let the API report what's wrong
+        if (maxDim <= 0) return bytes to mimeType
+        if (maxDim <= MAX_IMAGE_DIMENSION && bytes.size <= MAX_IMAGE_BYTES) return bytes to mimeType
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = 1
+            while (maxDim / inSampleSize > MAX_IMAGE_DIMENSION) inSampleSize *= 2
+        }
+        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            ?: return bytes to mimeType
+        // inSampleSize only halves in powers of two — scale the rest exactly
+        val scale = MAX_IMAGE_DIMENSION.toFloat() / maxOf(bitmap.width, bitmap.height)
+        if (scale < 1f) {
+            val scaled = Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+            if (scaled !== bitmap) bitmap.recycle()
+            bitmap = scaled
+        }
+        val out = java.io.ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        bitmap.recycle()
+        Log.i(
+            TAG,
+            "Downscaled image ${bounds.outWidth}x${bounds.outHeight} (${bytes.size} B) " +
+                "-> ${out.size()} B jpeg"
+        )
+        return out.toByteArray() to "image/jpeg"
     }
 
     /** Sniffs the real file type from magic bytes; falls back to a usable mime hint. */
