@@ -24,6 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.okonomiflyt.companion.Account
+import com.okonomiflyt.companion.Budget
+import com.okonomiflyt.companion.BudgetItem
 import com.okonomiflyt.companion.FirebaseService
 import com.okonomiflyt.companion.receipts.ClaudeReceiptParser
 import com.okonomiflyt.companion.receipts.ParsedReceipt
@@ -37,6 +40,11 @@ import java.util.Locale
  * Share target for receipts (PDF or screenshot) from grocery chain apps.
  * Flow per receipt: parse with Claude -> review line items -> link to a
  * matching transaction (auto when exactly one candidate) -> save to Firestore.
+ * Without a match the receipt is booked as a new transaction (reconciled:false)
+ * by default — payment methods like Trumf Pay have no bank transaction until
+ * the invoice arrives, but the receipt proves the purchase happened. The later
+ * invoice/bank import matches the row against this transaction (date + amount
+ * + name) and merges via the duplicate review.
  */
 class ReceiptShareActivity : ComponentActivity() {
 
@@ -97,11 +105,27 @@ private sealed interface ReceiptState {
         val receipt: ParsedReceipt,
         val candidates: List<TransactionMatch>,
         val selectedTransactionId: String?,
-        val isDuplicate: Boolean
+        val isDuplicate: Boolean,
+        val booking: BookingState
     ) : ReceiptState
 
     data object Saving : ReceiptState
 }
+
+/**
+ * How the receipt is booked when no existing transaction is linked: as a new
+ * transaction on the chosen budget/account/budget item. Defaults come from
+ * the store's merchant preference, else shared budget + a "dagligvarer" def.
+ */
+private data class BookingState(
+    val enabled: Boolean,
+    val budgets: List<Budget>,
+    val accounts: List<Account>,
+    val defs: List<BudgetItem>,
+    val budget: Budget?,
+    val account: Account?,
+    val def: BudgetItem?
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,17 +146,49 @@ private fun ReceiptQueueScreen(
     // Known product names per chain family + persistent corrections, fetched once per session
     var knownNames by remember { mutableStateOf<Map<String, List<String>>?>(null) }
     var parserLessons by remember { mutableStateOf<List<String>?>(null) }
+    // Booking metadata, fetched once per share session
+    var budgets by remember { mutableStateOf<List<Budget>?>(null) }
+    var accounts by remember { mutableStateOf<List<Account>?>(null) }
+    val defsCache = remember { mutableMapOf<String, List<BudgetItem>>() }
 
     val finished = uris.isEmpty() || currentIndex >= uris.size
+
+    suspend fun defsFor(budgetType: String): List<BudgetItem> =
+        defsCache[budgetType]
+            ?: firebaseService.getBudgetItems(budgetType).also { defsCache[budgetType] = it }
 
     suspend fun buildReviewState(receipt: com.okonomiflyt.companion.receipts.ParsedReceipt): ReceiptState.Review {
         val candidates = firebaseService.findMatchingTransactions(receipt.total, receipt.date)
         val isDuplicate = firebaseService.receiptExists(receipt.date, receipt.total)
+
+        // Booking defaults for when no transaction gets linked: the store's
+        // merchant preference, else shared budget + a "dagligvarer" def.
+        val allBudgets = budgets ?: firebaseService.getBudgets().also { budgets = it }
+        val allAccounts = accounts ?: firebaseService.getAccounts().also { accounts = it }
+        val pref = firebaseService.getMerchantPreference(receipt.store)
+        val budget = pref?.budgetId?.let { id -> allBudgets.find { it.id == id } }
+            ?: allBudgets.find { it.type == "shared" }
+            ?: allBudgets.firstOrNull()
+        val defs = budget?.let { defsFor(it.type) } ?: emptyList()
+        val def = pref?.budgetItemId?.let { id -> defs.find { it.id == id } }
+            ?: defs.find { it.name.contains("dagligvare", ignoreCase = true) }
+        val account = pref?.accountId?.let { id -> allAccounts.find { it.id == id } }
+            ?: allAccounts.firstOrNull()
+
         return ReceiptState.Review(
             receipt = receipt,
             candidates = candidates,
             selectedTransactionId = candidates.singleOrNull()?.id,
-            isDuplicate = isDuplicate
+            isDuplicate = isDuplicate,
+            booking = BookingState(
+                enabled = true,
+                budgets = allBudgets,
+                accounts = allAccounts,
+                defs = defs,
+                budget = budget,
+                account = account,
+                def = def
+            )
         )
     }
 
@@ -191,6 +247,25 @@ private fun ReceiptQueueScreen(
                         onSelectTransaction = { id ->
                             state = s.copy(selectedTransactionId = id)
                         },
+                        onToggleBooking = { enabled ->
+                            state = s.copy(booking = s.booking.copy(enabled = enabled))
+                        },
+                        onSelectBookingBudget = { budget ->
+                            scope.launch {
+                                // Defs are scoped by budget type — reload and keep
+                                // the selection if it's still eligible
+                                val defs = defsFor(budget.type)
+                                val def = s.booking.def?.let { d -> defs.find { it.id == d.id } }
+                                    ?: defs.find { it.name.contains("dagligvare", ignoreCase = true) }
+                                state = s.copy(booking = s.booking.copy(budget = budget, defs = defs, def = def))
+                            }
+                        },
+                        onSelectBookingAccount = { account ->
+                            state = s.copy(booking = s.booking.copy(account = account))
+                        },
+                        onSelectBookingDef = { def ->
+                            state = s.copy(booking = s.booking.copy(def = def))
+                        },
                         onReanalyze = { comment, remember ->
                             scope.launch {
                                 if (remember && comment.isNotBlank()) {
@@ -204,10 +279,37 @@ private fun ReceiptQueueScreen(
                             scope.launch {
                                 state = ReceiptState.Saving
                                 val match = s.candidates.find { it.id == s.selectedTransactionId }
+                                val booking = s.booking
+                                var transactionId = match?.id
+                                var budgetId = match?.budgetId
+
+                                // No existing transaction (e.g. Trumf Pay — the
+                                // invoice comes next month): book the receipt as
+                                // a new companion transaction and link it.
+                                if (match == null && booking.enabled &&
+                                    booking.budget != null && booking.account != null
+                                ) {
+                                    transactionId = firebaseService.saveTransaction(
+                                        date = s.receipt.date,
+                                        merchant = s.receipt.store,
+                                        amount = s.receipt.total.toString(),
+                                        card = "",
+                                        comment = "",
+                                        budgetId = booking.budget.id,
+                                        def = booking.def,
+                                        accountId = booking.account.id
+                                    )
+                                    if (transactionId == null) {
+                                        state = ReceiptState.Failed("Kunne ikke bokføre transaksjonen — prøv igjen")
+                                        return@launch
+                                    }
+                                    budgetId = booking.budget.id
+                                }
+
                                 val ok = firebaseService.saveReceipt(
                                     receipt = s.receipt,
-                                    transactionId = match?.id,
-                                    budgetId = match?.budgetId
+                                    transactionId = transactionId,
+                                    budgetId = budgetId
                                 )
                                 if (ok) {
                                     // Make the new names available to the next
@@ -291,6 +393,10 @@ private fun DoneView(savedCount: Int, onDone: () -> Unit) {
 private fun ReviewView(
     state: ReceiptState.Review,
     onSelectTransaction: (String?) -> Unit,
+    onToggleBooking: (Boolean) -> Unit,
+    onSelectBookingBudget: (Budget) -> Unit,
+    onSelectBookingAccount: (Account) -> Unit,
+    onSelectBookingDef: (BudgetItem?) -> Unit,
     onReanalyze: (comment: String, remember: Boolean) -> Unit,
     onSave: () -> Unit,
     onSkip: () -> Unit
@@ -354,6 +460,18 @@ private fun ReviewView(
 
             item { TransactionMatchCard(state, onSelectTransaction) }
 
+            if (state.selectedTransactionId == null) {
+                item {
+                    BookingCard(
+                        booking = state.booking,
+                        onToggle = onToggleBooking,
+                        onSelectBudget = onSelectBookingBudget,
+                        onSelectAccount = onSelectBookingAccount,
+                        onSelectDef = onSelectBookingDef
+                    )
+                }
+            }
+
             item { FeedbackCard(onReanalyze) }
 
             item {
@@ -407,7 +525,14 @@ private fun ReviewView(
                     Text("Hopp over")
                 }
                 Button(onClick = onSave, modifier = Modifier.weight(2f)) {
-                    Text("Lagre kvittering")
+                    Text(
+                        when {
+                            state.selectedTransactionId != null -> "Lagre og knytt"
+                            state.booking.enabled && state.booking.budget != null &&
+                                state.booking.account != null -> "Lagre og bokfør"
+                            else -> "Lagre kvittering"
+                        }
+                    )
                 }
             }
         }
@@ -541,7 +666,7 @@ private fun TransactionMatchCard(
             if (state.candidates.isEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Kvitteringen lagres som umatchet og kan knyttes i ØkonomiFlyt senere.",
+                    "Betalinger med f.eks. Trumf Pay dukker først opp når fakturaen importeres.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -571,6 +696,112 @@ private fun TransactionMatchCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Booking of an unlinked receipt as a new transaction (reconciled:false, like
+ * the notification logging flow). Defaults are prefilled from the store's
+ * merchant preference; saving updates the preference for next time.
+ */
+@Composable
+private fun BookingCard(
+    booking: BookingState,
+    onToggle: (Boolean) -> Unit,
+    onSelectBudget: (Budget) -> Unit,
+    onSelectAccount: (Account) -> Unit,
+    onSelectDef: (BudgetItem?) -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Bokfør som ny transaksjon",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        if (booking.enabled)
+                            "Bokføres nå og knyttes automatisk mot bank/faktura ved senere import."
+                        else
+                            "Kvitteringen lagres som umatchet og kan knyttes i ØkonomiFlyt senere.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = booking.enabled, onCheckedChange = onToggle)
+            }
+            if (booking.enabled) {
+                Spacer(Modifier.height(8.dp))
+                BookingDropdown(
+                    label = "Budsjett",
+                    options = booking.budgets,
+                    selected = booking.budget,
+                    optionLabel = { it.name },
+                    onSelect = { it?.let(onSelectBudget) }
+                )
+                Spacer(Modifier.height(8.dp))
+                BookingDropdown(
+                    label = "Konto",
+                    options = booking.accounts,
+                    selected = booking.account,
+                    optionLabel = { it.name },
+                    onSelect = { it?.let(onSelectAccount) }
+                )
+                Spacer(Modifier.height(8.dp))
+                BookingDropdown(
+                    label = "Budsjettpost",
+                    options = booking.defs,
+                    selected = booking.def,
+                    optionLabel = { "${it.name} (${it.categoryName})" },
+                    onSelect = onSelectDef,
+                    noneLabel = "Ingen — avstemmes senere"
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T : Any> BookingDropdown(
+    label: String,
+    options: List<T>,
+    selected: T?,
+    optionLabel: (T) -> String,
+    onSelect: (T?) -> Unit,
+    noneLabel: String? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selected?.let(optionLabel) ?: noneLabel ?: "",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (noneLabel != null) {
+                DropdownMenuItem(
+                    text = { Text(noneLabel) },
+                    onClick = { onSelect(null); expanded = false }
+                )
+            }
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option)) },
+                    onClick = { onSelect(option); expanded = false }
+                )
             }
         }
     }

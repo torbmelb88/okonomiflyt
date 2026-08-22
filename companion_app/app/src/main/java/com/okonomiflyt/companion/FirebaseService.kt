@@ -240,6 +240,7 @@ class FirebaseService {
         }
     }
 
+    /** Returns the new transaction's document id, or null on failure. */
     suspend fun saveTransaction(
         date: String,
         merchant: String,
@@ -256,7 +257,7 @@ class FirebaseService {
         paidPrivately: Boolean = false,
         coveredByAccountId: String? = null,
         currency: String? = null
-    ): Boolean {
+    ): String? {
         return try {
             val amountNum = amount.replace(Regex("[^\\d,.-]"), "").replace(",", ".").toDoubleOrNull() ?: 0.0
             val month = if (date.length >= 7) date.substring(0, 7) else ""
@@ -314,7 +315,7 @@ class FirebaseService {
                 "createdAt" to java.util.Date()
             )
 
-            firestore().collection("transactions").add(transactionData).await()
+            val ref = firestore().collection("transactions").add(transactionData).await()
 
             // Remember choices for next time — store the DEF id so recall re-selects it.
             saveMerchantPreference(
@@ -324,10 +325,10 @@ class FirebaseService {
                 accountId = finalAccountId.ifEmpty { null }
             )
 
-            true
+            ref.id
         } catch (e: Exception) {
             Log.e(TAG, "Error saving transaction", e)
-            false
+            null
         }
     }
 

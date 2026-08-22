@@ -331,7 +331,7 @@ fun LogTransactionScreen(
                         onSave = {
                             isSaving = true
                             scope.launch {
-                                val success = firebaseService.saveTransaction(
+                                val transactionId = firebaseService.saveTransaction(
                                     date = date,
                                     merchant = merchant,
                                     amount = amount,
@@ -349,7 +349,7 @@ fun LogTransactionScreen(
                                     currency = currency
                                 )
                                 isSaving = false
-                                if (success) { onSaved(); onDismiss() }
+                                if (transactionId != null) { onSaved(); onDismiss() }
                             }
                         },
                         onDismiss = onDismiss
