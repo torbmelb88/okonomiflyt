@@ -824,9 +824,9 @@ export function BudgetProvider({ children }) {
         return status?.reconciled || false;
     };
 
+    // Household-global: one monthStatuses doc per month, independent of the
+    // active budget. Legacy docs carry a budgetId; lookups ignore it.
     const setMonthReconciled = async (month, reconciled) => {
-        if (!activeBudgetId) return;
-
         try {
             const existing = monthStatuses.find(ms => ms.month === month);
 
@@ -842,7 +842,6 @@ export function BudgetProvider({ children }) {
             } else {
                 // Create new status
                 const newStatus = {
-                    budgetId: activeBudgetId,
                     month,
                     reconciled,
                     reconciledAt: reconciled ? new Date().toISOString() : null,

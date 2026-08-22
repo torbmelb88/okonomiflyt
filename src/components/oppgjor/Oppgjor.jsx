@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useBudget } from '../../contexts/BudgetContext';
-import { ArrowRight, Scale, Loader2, PiggyBank } from 'lucide-react';
+import { ArrowRight, Scale, Loader2, PiggyBank, CheckCircle2 } from 'lucide-react';
 import { api } from '../../services/firebase';
 import BufferCard from './BufferCard';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
+import { reconcileState } from '../../utils/reconciliation';
 
 /**
  * Oppgjør = settlement. Household-level, identical regardless of which budget is
@@ -12,8 +13,9 @@ import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
  * shared budget, across all transactions.
  */
 export default function Oppgjor() {
-    const { budgets, accounts, currentUser, loading } = useBudget();
+    const { budgets, accounts, currentUser, loading, monthStatuses, isMonthReconciled, setMonthReconciled } = useBudget();
     const [allTx, setAllTx] = useState(null);
+    const [savingReconciled, setSavingReconciled] = useState(false);
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
         now.setMonth(now.getMonth() - 1); // previous month — what you settle now
@@ -77,6 +79,37 @@ export default function Oppgjor() {
 
         return { userShare, partnerShare, userAmount, partnerAmount, splitLabel, utleggSelf, utleggPartner, totalActualConsumption };
     }, [allTx, sharedBudget, accounts, selectedMonth, currentUser, roundingMode]);
+
+    const monthReconciled = isMonthReconciled(selectedMonth);
+    const reconciledAt = monthStatuses.find(ms => ms.month === selectedMonth)?.reconciledAt;
+    // Transactions the month can't really close on: 'booked' = self-reported,
+    // waiting for its bank copy (the Trumf invoice arrives ~the 15th the next
+    // month), 'unreconciled' = not categorized yet. Uses the app's three-state
+    // model — the raw `reconciled` field alone would flag old bank rows from
+    // before the field existed.
+    const pending = useMemo(() => {
+        const states = (allTx || []).filter(t => t.month === selectedMonth).map(reconcileState);
+        return {
+            booked: states.filter(s => s === 'booked').length,
+            unreconciled: states.filter(s => s === 'unreconciled').length,
+        };
+    }, [allTx, selectedMonth]);
+    const pendingLabel = () => {
+        const n = (x) => x === 1 ? '1 transaksjon' : `${x} transaksjoner`;
+        const parts = [];
+        if (pending.booked > 0) parts.push(`${n(pending.booked)} er kun bokført (venter på bankmatch)`);
+        if (pending.unreconciled > 0) parts.push(`${n(pending.unreconciled)} er ikke kategorisert`);
+        return parts.join(' og ');
+    };
+    const toggleReconciled = async () => {
+        if (!monthReconciled && pending.booked + pending.unreconciled > 0) {
+            if (!window.confirm(`${pendingLabel()} i ${formatMonth(selectedMonth)}. Vil du likevel markere måneden som avstemt?`)) return;
+        }
+        setSavingReconciled(true);
+        try { await setMonthReconciled(selectedMonth, !monthReconciled); }
+        catch { /* logget i BudgetContext */ }
+        finally { setSavingReconciled(false); }
+    };
 
     const coveredFromList = useMemo(() => {
         if (!allTx) return [];
@@ -174,6 +207,43 @@ export default function Oppgjor() {
                             </div>
                         </div>
                     )}
+
+                    {/* Månedsstatus: markerer måneden som ferdig avstemt (monthStatuses) */}
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between gap-4">
+                        {monthReconciled ? (
+                            <>
+                                <div className="flex items-center gap-3">
+                                    <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
+                                    <div>
+                                        <div className="font-semibold text-gray-900 dark:text-gray-100 capitalize">{formatMonth(selectedMonth)} er avstemt</div>
+                                        {reconciledAt && <div className="text-xs text-gray-500 dark:text-gray-400">Markert {new Date(reconciledAt).toLocaleDateString('no-NO', { day: 'numeric', month: 'long' })}</div>}
+                                    </div>
+                                </div>
+                                <button onClick={toggleReconciled} disabled={savingReconciled}
+                                    className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline disabled:opacity-50">
+                                    Angre
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <div>
+                                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                                        Marker <span className="capitalize font-medium">{formatMonth(selectedMonth)}</span> som ferdig avstemt når oppgjøret er gjennomført.
+                                    </div>
+                                    {pending.booked + pending.unreconciled > 0 && (
+                                        <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                                            {pendingLabel()}.
+                                        </div>
+                                    )}
+                                </div>
+                                <button onClick={toggleReconciled} disabled={savingReconciled}
+                                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex-shrink-0">
+                                    {savingReconciled ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                                    Marker som avstemt
+                                </button>
+                            </>
+                        )}
+                    </div>
                 </>
             )}
         </div>

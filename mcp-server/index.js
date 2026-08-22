@@ -57,6 +57,22 @@ function isMoneyMovement(t, expensesById) {
     return false;
 }
 
+// Mirrors src/utils/reconciliation.js — the app's three-state model. Bank-origin
+// rows (SB1/CSV) ARE the bank's record, so categorized = reconciled even when
+// the raw `reconciled` field is false (rows from before the field existed).
+// Self-reported rows (companion app/MCP) stay 'booked' until their bank copy
+// arrives; a foreign-currency amount is by definition not bank-matched yet.
+const SELF_REPORTED_SOURCES = ['companion_app', 'mcp'];
+const isSelfReported = (t) => SELF_REPORTED_SOURCES.includes(t?.source);
+const awaitingBankAmount = (t) => !!(t.currency && t.currency !== 'NOK');
+
+function reconcileState(t) {
+    if (awaitingBankAmount(t)) return t.budgetItemId ? 'booked' : 'unreconciled';
+    if (t.reconciled) return 'reconciled';
+    if (!t.budgetItemId) return 'unreconciled';
+    return isSelfReported(t) ? 'booked' : 'reconciled';
+}
+
 function txView(t, accountsById, expensesById, budgetsById) {
     const view = {
         id: t.id,
@@ -68,7 +84,7 @@ function txView(t, accountsById, expensesById, budgetsById) {
         account: accountsById.get(t.accountId)?.name || t.accountId || null,
         budgetItem: t.budgetItemId ? (expensesById.get(t.budgetItemId)?.name || t.budgetItemId) : null,
         category: t.category || null,
-        reconciled: !!t.reconciled,
+        reconcileState: reconcileState(t),
     };
     if (t.paidPrivatelyBy) view.paidPrivatelyBy = t.paidPrivatelyBy;
     if (t.isRefund) view.isRefund = true;
@@ -149,7 +165,7 @@ function buildServer() {
 
     server.registerTool('get_month_summary', {
         title: 'Get month summary',
-        description: 'Budget vs. actual for a month, per budget: income, spending (refunds deducted), each budget line with budgeted and actual amount, unbudgeted spending grouped by category, and reconciliation status. Money movement (savings transfers, credit card bill payments, internal transfers) is excluded from the income/spending totals but savings lines still appear in the line list. Note: numbers for a month are only authoritative once reconciled=true.',
+        description: 'Budget vs. actual for a month, per budget: income, spending (refunds deducted), each budget line with budgeted and actual amount, unbudgeted spending grouped by category, and reconciliation status. Money movement (savings transfers, credit card bill payments, internal transfers) is excluded from the income/spending totals but savings lines still appear in the line list. pendingTransactions counts rows not fully settled: awaitingBankMatch = self-reported rows waiting for their bank copy, uncategorized = rows without a budget line. Note: numbers for a month are only authoritative once reconciled=true.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM, defaults to the current month'),
             budgetId: z.string().optional().describe('Limit to one budget; omit for all budgets'),
@@ -203,14 +219,19 @@ function buildServer() {
                 budgetId: b.id,
                 budget: b.name,
                 month: m,
-                reconciled: !!monthStatuses.find(ms => ms.budgetId === b.id)?.reconciled,
+                // The month flag is household-global (set from the Oppgjør page);
+                // legacy docs carry a budgetId, which is ignored.
+                reconciled: monthStatuses.some(ms => ms.reconciled),
                 totals: {
                     income: Math.round(income * 100) / 100,
                     spending: Math.round(spending * 100) / 100,
                     refundsDeducted: Math.round(refunds * 100) / 100,
                     net: Math.round((income - spending) * 100) / 100,
                 },
-                unreconciledTransactions: txs.filter(t => !t.reconciled).length,
+                pendingTransactions: {
+                    awaitingBankMatch: txs.filter(t => reconcileState(t) === 'booked').length,
+                    uncategorized: txs.filter(t => reconcileState(t) === 'unreconciled').length,
+                },
                 lines,
                 unbudgetedByCategory: Object.fromEntries(
                     Object.entries(unbudgeted).map(([k, v]) => [k, Math.round(v * 100) / 100])
@@ -222,14 +243,14 @@ function buildServer() {
 
     server.registerTool('list_transactions', {
         title: 'List transactions',
-        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
+        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM. Strongly recommended to limit the result.'),
             budgetId: z.string().optional(),
             accountId: z.string().optional(),
             search: z.string().optional().describe('Case-insensitive substring match on the transaction name'),
             type: z.enum(['expense', 'income']).optional(),
-            onlyUnreconciled: z.boolean().optional().describe('Only transactions not yet reconciled'),
+            onlyUnreconciled: z.boolean().optional().describe('Only transactions not fully reconciled (reconcileState "booked" or "unreconciled")'),
             limit: z.number().optional().describe('Max rows returned, default 100'),
         },
     }, async ({ month, budgetId, accountId, search, type, onlyUnreconciled, limit }) => {
@@ -246,7 +267,7 @@ function buildServer() {
 
         let result = transactions;
         if (search) result = result.filter(t => (t.name || '').toLowerCase().includes(search.toLowerCase()));
-        if (onlyUnreconciled) result = result.filter(t => !t.reconciled);
+        if (onlyUnreconciled) result = result.filter(t => reconcileState(t) !== 'reconciled');
         result.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         const capped = result.slice(0, limit || 100);
         return ok({
