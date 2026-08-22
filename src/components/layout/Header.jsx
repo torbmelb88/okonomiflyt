@@ -105,6 +105,7 @@ export default function Header() {
                         )}
                         <Link to="/budget" className={`hover:text-white/80 transition-colors ${isActive('/budget') ? 'font-bold' : ''}`}>Budsjett</Link>
                         <Link to="/forbruk" className={`hover:text-white/80 transition-colors ${isActive('/forbruk') ? 'font-bold' : ''}`}>Forbruk</Link>
+                        <Link to="/transaksjoner" className={`hover:text-white/80 transition-colors ${isActive('/transaksjoner') ? 'font-bold' : ''}`}>Transaksjoner</Link>
                         <Link to="/sparing" className={`hover:text-white/80 transition-colors ${isActive('/sparing') ? 'font-bold' : ''}`}>Sparing</Link>
                         <Link to="/oppgjor" className={`hover:text-white/80 transition-colors ${isActive('/oppgjor') ? 'font-bold' : ''}`}>Oppgjør</Link>
                         <Link to="/projects" className={`hover:text-white/80 transition-colors ${isActive('/projects') ? 'font-bold' : ''}`}>Prosjekter</Link>
@@ -188,6 +189,17 @@ export default function Header() {
                                 )}
                             >
                                 Forbruk
+                            </Link>
+
+                            <Link
+                                to="/transaksjoner"
+                                onClick={() => setIsMobileNavOpen(false)}
+                                className={clsx(
+                                    "block px-4 py-3 rounded-lg text-base font-medium transition-colors",
+                                    isActive('/transaksjoner') ? "bg-white/10" : "hover:bg-white/10"
+                                )}
+                            >
+                                Transaksjoner
                             </Link>
 
                             <Link

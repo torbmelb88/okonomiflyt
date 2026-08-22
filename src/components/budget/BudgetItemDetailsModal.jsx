@@ -1,28 +1,20 @@
-import { X, ExternalLink, Unlink, Ban } from 'lucide-react';
+import { useState } from 'react';
+import { X, ExternalLink, Edit2 } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import clsx from 'clsx';
+import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
 
 export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, selectedMonth }) {
-    const { transactions, updateTransaction } = useBudget();
+    const { transactions } = useBudget();
+
+    // Editing (payer, exclusion, unlinking etc.) happens in the reconcile
+    // dialog — same flow as the edit button in the transaction list.
+    const [editTransaction, setEditTransaction] = useState(null);
 
     if (!isOpen || !budgetItem) return null;
 
     // Filter transactions linked to this budget item
     const linkedTransactions = transactions.filter(t => t.budgetItemId === budgetItem.id && t.month === selectedMonth);
-
-    const handleUnlink = async (transactionId) => {
-        if (window.confirm('Er du sikker på at du vil fjerne koblingen til denne transaksjonen?')) {
-            try {
-                await updateTransaction(transactionId, {
-                    budgetItemId: null,
-                    reconciled: false
-                });
-            } catch (error) {
-                console.error("Failed to unlink transaction:", error);
-                alert("Kunne ikke fjerne kobling.");
-            }
-        }
-    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -78,15 +70,6 @@ export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, se
                                         </div>
                                     </div>
                                     <div className="flex items-center space-x-3">
-                                        <select
-                                            value={trans.payer || 'shared'}
-                                            onChange={(e) => updateTransaction(trans.id, { payer: e.target.value })}
-                                            className="text-xs border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded p-1 mr-2"
-                                        >
-                                            <option value="shared">Felles</option>
-                                            <option value="self">Meg</option>
-                                            <option value="partner">Partner</option>
-                                        </select>
                                         <span className={clsx(
                                             "font-bold",
                                             trans.type === 'income' ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
@@ -94,23 +77,11 @@ export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, se
                                             {trans.type === 'income' ? '+' : '-'}{trans.amount.toLocaleString('no-NO')} kr
                                         </span>
                                         <button
-                                            onClick={() => updateTransaction(trans.id, { excludeFromSharedCalc: !trans.excludeFromSharedCalc })}
-                                            className={clsx(
-                                                "p-1.5 rounded-lg transition-all",
-                                                trans.excludeFromSharedCalc 
-                                                    ? "text-orange-600 bg-orange-100 dark:bg-orange-900/30" 
-                                                    : "text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20"
-                                            )}
-                                            title={trans.excludeFromSharedCalc ? "Ta med i fordeling" : "Hold utenfor fordeling"}
+                                            onClick={() => setEditTransaction(trans)}
+                                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all"
+                                            title="Rediger transaksjon"
                                         >
-                                            <Ban className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => handleUnlink(trans.id)}
-                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all"
-                                            title="Fjern kobling"
-                                        >
-                                            <Unlink className="w-4 h-4" />
+                                            <Edit2 className="w-4 h-4" />
                                         </button>
                                     </div>
                                 </div>
@@ -123,6 +94,13 @@ export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, se
                     </div>
                 </div>
             </div>
+
+            <ReconcileTransactionsModal
+                isOpen={!!editTransaction}
+                onClose={() => setEditTransaction(null)}
+                transactions={editTransaction ? [editTransaction] : []}
+                onComplete={() => setEditTransaction(null)}
+            />
         </div>
     );
 }

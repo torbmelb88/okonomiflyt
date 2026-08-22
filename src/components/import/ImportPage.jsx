@@ -10,7 +10,7 @@ import TrumfInvoiceImportFlow from './TrumfInvoiceImportFlow';
  * automatic fetch from SpareBank 1 (staged by the home-server sync), and for
  * the credit cards that fall outside the bank API either the monthly invoice
  * PDF (Trumf Kredittkort) or a manual CSV. Viewing and reconciling everything
- * lives on Forbruk.
+ * lives on Transaksjoner; spending statistics on Forbruk.
  */
 export default function ImportPage() {
     const { activeBudget, accounts, loading } = useBudget();
@@ -38,7 +38,7 @@ export default function ImportPage() {
                 </div>
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Import</h1>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Hent transaksjoner inn i appen. Avstemming og oversikt finner du under Forbruk.</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Hent transaksjoner inn i appen. Avstemming og transaksjonslisten finner du under Transaksjoner.</p>
                 </div>
             </div>
 

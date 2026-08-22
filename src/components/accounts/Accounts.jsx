@@ -9,7 +9,7 @@ import ConfirmationModal from '../common/ConfirmationModal';
 /**
  * Kontoer = account management (balances, sharing) for everything: bank
  * accounts on top, credit cards in their own section below since they fall
- * outside the SpareBank 1 sync. Transactions live on Forbruk, import on the
+ * outside the SpareBank 1 sync. Transactions live on Transaksjoner, import on the
  * Import page.
  */
 export default function Accounts() {
@@ -63,7 +63,7 @@ export default function Accounts() {
                     </div>
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Kontoer</h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Bankkontoer, sparing og kredittkort. Transaksjoner finner du under Forbruk.</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Bankkontoer, sparing og kredittkort. Transaksjoner finner du under Transaksjoner.</p>
                     </div>
                 </div>
                 <button onClick={() => setIsImportOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 shadow-sm text-sm self-start md:self-auto">

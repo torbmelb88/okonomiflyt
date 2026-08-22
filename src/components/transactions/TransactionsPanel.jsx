@@ -181,7 +181,7 @@ export default function TransactionsPanel({
         }
     };
 
-    // Lets a parent (e.g. the Forbruk "needs follow-up" banner) open the
+    // Lets a parent (e.g. the Transaksjoner "needs follow-up" banner) open the
     // reconcile flow by bumping a nonce.
     useEffect(() => {
         if (reconcileNonce) handleManualReconcile();

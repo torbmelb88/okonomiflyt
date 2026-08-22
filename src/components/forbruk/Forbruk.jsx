@@ -2,30 +2,24 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useBudget } from '../../contexts/BudgetContext';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { Users, DollarSign, AlertTriangle, CheckCircle2, Download } from 'lucide-react';
+import { Users, DollarSign, ArrowRight, List } from 'lucide-react';
 import clsx from 'clsx';
-import TransactionsPanel from '../transactions/TransactionsPanel';
 import BudgetItemDetailsModal from '../budget/BudgetItemDetailsModal';
-import { isHandled, reconcileState } from '../../utils/reconciliation';
 
 /**
- * Forbruk = the "past": actual spending. It owns the complete transaction list
- * (bank + credit card in one view) plus the budget-vs-actual comparison and
- * the shared split that used to live on the Budsjett page. Two states:
- * everything reconciled, or transactions still needing follow-up.
- *
- * Getting transactions in happens on the Import page; planning (editing
- * budgeted amounts) stays on Budsjett — here the budget figures are read-only
- * context for the actuals.
+ * Forbruk = spending statistics: the budget-vs-actual comparison and the
+ * actual-spending pie for a chosen month. The raw transaction list and
+ * reconciliation live on the Transaksjoner page; getting transactions in
+ * happens on the Import page; planning (editing budgeted amounts) stays on
+ * Budsjett — here the budget figures are read-only context for the actuals.
  */
 export default function Forbruk() {
-    const { activeBudget, expenses, transactions, accounts, budgetItemDefs, categories, loading, getMonthlyBudget } = useBudget();
+    const { activeBudget, expenses, transactions, budgetItemDefs, categories, loading, getMonthlyBudget } = useBudget();
 
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
-    const [reconcileNonce, setReconcileNonce] = useState(0);
     const [detailsItem, setDetailsItem] = useState(null);
 
     if (loading) return <div>Laster forbruk...</div>;
@@ -36,12 +30,11 @@ export default function Forbruk() {
         return new Date(year, parseInt(month) - 1).toLocaleDateString('no-NO', { month: 'long', year: 'numeric' });
     };
 
-    // --- Two-state banner: transactions still needing follow-up this month.
-    // Booked rows (categorized, awaiting bank match) need no follow-up but are
-    // counted separately so the banner can say the month isn't final yet. ---
-    const monthTransactions = transactions.filter(t => t.month === selectedMonth);
-    const unreconciledCount = monthTransactions.filter(t => !isHandled(t)).length;
-    const bookedCount = monthTransactions.filter(t => reconcileState(t) === 'booked').length;
+    const changeMonth = (delta) => {
+        const [year, month] = selectedMonth.split('-').map(Number);
+        const newDate = new Date(year, month - 1 + delta);
+        setSelectedMonth(`${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`);
+    };
 
     // --- Budget vs Actual (read-only context, computed budget-wide) ---
     // Items whose def or category is flagged "utenfor statistikk" are kept out
@@ -87,46 +80,29 @@ export default function Forbruk() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Forbruk</h1>
-                <Link to="/import" className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm">
-                    <Download className="w-4 h-4" />
-                    <span>Til import</span>
+                <Link to="/transaksjoner" className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm">
+                    <List className="w-4 h-4" />
+                    <span>Til transaksjoner</span>
                 </Link>
             </div>
 
-            {/* Two-state banner */}
-            {unreconciledCount > 0 ? (
-                <div className="flex items-center justify-between gap-4 p-4 rounded-xl border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
-                    <div className="flex items-center gap-3">
-                        <AlertTriangle className="w-6 h-6 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                        <div>
-                            <div className="font-semibold text-amber-800 dark:text-amber-200">
-                                {unreconciledCount} {unreconciledCount === 1 ? 'transaksjon trenger' : 'transaksjoner trenger'} oppfølging
-                            </div>
-                            <div className="text-sm text-amber-700 dark:text-amber-300">Koble dem til budsjettposter for å få riktig forbruk for {formatMonth(selectedMonth)}.</div>
-                        </div>
+            {/* Month Navigation */}
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center justify-between">
+                    <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+                        <ArrowRight className="w-5 h-5 transform rotate-180 text-gray-600 dark:text-gray-400" />
+                    </button>
+                    <div className="text-center flex-1 mx-4">
+                        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 capitalize">{formatMonth(selectedMonth)}</h2>
+                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                            {Math.round(totalActual).toLocaleString('no-NO')} av {Math.round(totalBudgeted).toLocaleString('no-NO')} kr brukt
+                        </span>
                     </div>
-                    <button
-                        onClick={() => setReconcileNonce(n => n + 1)}
-                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg shadow-sm whitespace-nowrap"
-                    >
-                        Avstem nå
+                    <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors ml-2">
+                        <ArrowRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                     </button>
                 </div>
-            ) : (
-                <div className="flex items-center gap-3 p-4 rounded-xl border bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
-                    <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
-                    <div>
-                        <div className="font-semibold text-green-800 dark:text-green-200">
-                            Alt håndtert for {formatMonth(selectedMonth)} — forbruket er koblet til budsjettpostene.
-                        </div>
-                        {bookedCount > 0 && (
-                            <div className="text-sm text-green-700 dark:text-green-300">
-                                {bookedCount} {bookedCount === 1 ? 'bokført transaksjon venter' : 'bokførte transaksjoner venter'} på avstemming mot banken — beløpene bekreftes ved neste bankimport.
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
+            </div>
 
             {/* Budget vs Actual + Actual pie */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -184,14 +160,6 @@ export default function Forbruk() {
                 onClose={() => setDetailsItem(null)}
                 budgetItem={detailsItem}
                 selectedMonth={selectedMonth}
-            />
-
-            {/* Transactions (all accounts, bank + credit card) */}
-            <TransactionsPanel
-                accounts={accounts}
-                selectedMonth={selectedMonth}
-                setSelectedMonth={setSelectedMonth}
-                reconcileNonce={reconcileNonce}
             />
         </div>
     );

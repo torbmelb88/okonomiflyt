@@ -9,6 +9,7 @@ import Settings from './components/settings/Settings';
 import Accounts from './components/accounts/Accounts';
 import Budget from './components/budget/Budget';
 import Forbruk from './components/forbruk/Forbruk';
+import Transactions from './components/transactions/Transactions';
 import ImportPage from './components/import/ImportPage';
 import Sparing from './components/sparing/Sparing';
 import Oppgjor from './components/oppgjor/Oppgjor';
@@ -63,6 +64,7 @@ function App() {
                 <Route path="accounts" element={<Accounts />} />
                 <Route path="budget" element={<Budget />} />
                 <Route path="forbruk" element={<Forbruk />} />
+                <Route path="transaksjoner" element={<Transactions />} />
                 <Route path="import" element={<ImportPage />} />
                 <Route path="sparing" element={<Sparing />} />
                 <Route path="oppgjor" element={<Oppgjor />} />
