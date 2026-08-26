@@ -7,6 +7,7 @@ import {
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
+import { exclusionReason } from '../../utils/settlement';
 import MergeTransactionsModal from './MergeTransactionsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
@@ -343,7 +344,7 @@ export default function TransactionsPanel({
                                         <div>
                                             <div className="font-medium text-gray-900 dark:text-gray-100">
                                                 {trans.name}
-                                                {trans.excludeFromSharedCalc && <span className="ml-1 text-orange-500" title="Holdt utenfor fordeling">*</span>}
+                                                {exclusionReason(trans, accounts) && <span className="ml-1 text-orange-500" title={exclusionReason(trans, accounts) === 'account' ? 'Holdt utenfor fordeling av kontoflagg' : 'Holdt utenfor fordeling'}>*</span>}
                                             </div>
                                             <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
                                                 <span>{trans.date} • {linkedExpense ? linkedExpense.category : (trans.category || 'Ukategorisert')}</span>

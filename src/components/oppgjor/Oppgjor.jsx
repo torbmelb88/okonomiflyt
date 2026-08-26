@@ -5,6 +5,7 @@ import { api } from '../../services/firebase';
 import BufferCard from './BufferCard';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import { reconcileState } from '../../utils/reconciliation';
+import { isExcludedFromSplit } from '../../utils/settlement';
 
 /**
  * Oppgjør = settlement. Household-level, identical regardless of which budget is
@@ -51,9 +52,7 @@ export default function Oppgjor() {
 
     const split = useMemo(() => {
         if (!allTx || !sharedBudget) return null;
-        const accountExcludesSplit = (accountId) => !!accounts.find(a => a.id === accountId)?.excludeFromSharedCalc;
-        const isExcluded = (t) => !t.budgetItemId || t.excludeFromSharedCalc || accountExcludesSplit(t.accountId);
-        const monthTx = allTx.filter(t => t.budgetId === sharedBudget.id && t.month === selectedMonth && !isExcluded(t));
+        const monthTx = allTx.filter(t => t.budgetId === sharedBudget.id && t.month === selectedMonth && !isExcludedFromSplit(t, accounts));
         // Income-type transactions (credit notes/refunds) reduce the settlement
         const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
         const totalSharedActual = sum(monthTx.filter(t => !t.payer || t.payer === 'shared'));
