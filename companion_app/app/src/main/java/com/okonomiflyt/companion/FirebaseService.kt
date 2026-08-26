@@ -256,7 +256,9 @@ class FirebaseService {
         projectSubcategory: String? = null,
         paidPrivately: Boolean = false,
         coveredByAccountId: String? = null,
-        currency: String? = null
+        currency: String? = null,
+        awaitingRefund: Boolean = false,
+        expectedRefundAmount: Double? = null
     ): String? {
         return try {
             val amountNum = amount.replace(Regex("[^\\d,.-]"), "").replace(",", ".").toDoubleOrNull() ?: 0.0
@@ -310,6 +312,10 @@ class FirebaseService {
                 // bank later posts the converted NOK amount, which replaces
                 // this copy via merge. Null for domestic purchases.
                 "currency" to currency,
+                // «Refunderes»: someone pays this back (Vipps etc.). The web app
+                // links the incoming payment(s) and clears the flag explicitly.
+                "awaitingRefund" to awaitingRefund,
+                "expectedRefundAmount" to if (awaitingRefund) expectedRefundAmount else null,
                 "reconciled" to false,
                 "source" to "companion_app",
                 "createdAt" to java.util.Date()

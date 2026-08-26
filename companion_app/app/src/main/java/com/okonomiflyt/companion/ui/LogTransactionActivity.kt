@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,6 +99,10 @@ fun LogTransactionScreen(
     var excludeFromSharedCalc by remember { mutableStateOf(false) }
     var coveredByAccountId by remember { mutableStateOf<String?>(null) }
     var paidPrivately by remember { mutableStateOf(false) }
+    // «Refunderes»: someone pays (part of) this back — linked to the incoming
+    // payment(s) in the web app's reconcile dialog.
+    var awaitingRefund by remember { mutableStateOf(false) }
+    var expectedRefundAmount by remember { mutableStateOf("") }
     var cardAutoMatched by remember { mutableStateOf(false) }
     var projectExpanded by remember { mutableStateOf(false) }
 
@@ -320,6 +326,10 @@ fun LogTransactionScreen(
                         showPaidPrivately = showPaidPrivately,
                         paidPrivately = paidPrivately,
                         onPaidPrivatelyChange = { paidPrivately = it },
+                        awaitingRefund = awaitingRefund,
+                        onAwaitingRefundChange = { awaitingRefund = it; if (!it) expectedRefundAmount = "" },
+                        expectedRefundAmount = expectedRefundAmount,
+                        onExpectedRefundAmountChange = { expectedRefundAmount = it },
                         projects = visibleProjects,
                         selectedProject = selectedProject,
                         onProjectSelect = { selectedProject = it; selectedProjectSubcategory = null },
@@ -346,7 +356,9 @@ fun LogTransactionScreen(
                                     projectSubcategory = if (selectedProject != null) selectedProjectSubcategory else null,
                                     paidPrivately = showPaidPrivately && paidPrivately,
                                     coveredByAccountId = coveredByAccountId,
-                                    currency = currency
+                                    currency = currency,
+                                    awaitingRefund = awaitingRefund,
+                                    expectedRefundAmount = expectedRefundAmount.replace(",", ".").toDoubleOrNull()
                                 )
                                 isSaving = false
                                 if (transactionId != null) { onSaved(); onDismiss() }
@@ -462,6 +474,10 @@ fun StepDetails(
     showPaidPrivately: Boolean,
     paidPrivately: Boolean,
     onPaidPrivatelyChange: (Boolean) -> Unit,
+    awaitingRefund: Boolean,
+    onAwaitingRefundChange: (Boolean) -> Unit,
+    expectedRefundAmount: String,
+    onExpectedRefundAmountChange: (String) -> Unit,
     projects: List<Project>,
     selectedProject: Project?,
     onProjectSelect: (Project?) -> Unit,
@@ -585,6 +601,30 @@ fun StepDetails(
             onCheckedChange = onIsUnnecessaryChange,
             label = "Marker som unødvendig"
         )
+
+        ToggleRow(
+            checked = awaitingRefund,
+            onCheckedChange = onAwaitingRefundChange,
+            label = "Refunderes helt eller delvis"
+        )
+        if (awaitingRefund) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+                OutlinedTextField(
+                    value = expectedRefundAmount,
+                    onValueChange = { v -> if (v.isEmpty() || v.matches(Regex("^\\d*[.,]?\\d{0,2}$"))) onExpectedRefundAmountChange(v) },
+                    label = { Text("Forventet beløp (tomt = hele kjøpet)") },
+                    suffix = { Text("kr") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Kjøpet telles fullt ut inntil innbetalingen(e) knyttes til det i web-appen. Flere Vipps kan knyttes til samme kjøp.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+        }
 
         ToggleRow(
             checked = excludeFromSharedCalc,
