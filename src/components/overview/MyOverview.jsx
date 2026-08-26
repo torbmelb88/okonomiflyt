@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/firebase';
 import { ArrowRight, Wallet, CreditCard, PiggyBank, Calculator, Info, Landmark } from 'lucide-react';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
+import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
 
 export default function MyOverview() {
     const { activeBudget, budgets, transactions, accounts } = useBudget();
@@ -418,6 +419,15 @@ export default function MyOverview() {
                             </div>
                         </div>
                     </div>
+
+                    <UnnecessaryPurchasesCard
+                        transactions={transactions}
+                        selectedMonth={selectedMonth}
+                        prevMonth={prevMonthStr}
+                        formatMonth={formatMonth}
+                        accounts={accounts}
+                        leftToSpend={leftToSpend}
+                    />
 
                     <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
                         <h4 className="font-bold text-gray-900 dark:text-white mb-2">Tips</h4>
