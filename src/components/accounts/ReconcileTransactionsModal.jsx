@@ -7,14 +7,15 @@ import InfoTip from '../common/InfoTip';
 import { findBudgetItemSuggestion } from '../../utils/textMatch';
 import { FOREIGN_CURRENCIES } from '../../utils/currency';
 import { reconcilesOnLink } from '../../utils/reconciliation';
-import { refundStatus, refundsOf } from '../../utils/refunds';
+import { refundStatus, refundsOf, allocationsValid, allocationComplete, parseAmount } from '../../utils/refunds';
+import RefundAllocationEditor from './RefundAllocationEditor';
 import clsx from 'clsx';
 
 export default function ReconcileTransactionsModal({ isOpen, onClose, transactions, onComplete }) {
     const {
         expenses, budgetItemDefs, categories, ensureInstanceForDef,
         addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, transactions: allTransactions,
-        linkRefund, unlinkRefund,
+        linkRefund, linkRefundSplit, unlinkRefund,
     } = useBudget();
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedBudgetItemId, setSelectedBudgetItemId] = useState(''); // holds a def id
@@ -34,12 +35,11 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const [comment, setComment] = useState('');
     const [refundMode, setRefundMode] = useState(false);
     const [refundSearch, setRefundSearch] = useState('');
-    const [selectedRefundId, setSelectedRefundId] = useState('');
     // «Refunderes»: the purchase waits for one or more incoming payments.
     const [awaitingRefund, setAwaitingRefund] = useState(false);
     const [expectedRefundAmount, setExpectedRefundAmount] = useState('');
-    // null = use the computed default («covers the rest»); the user can override.
-    const [completeRefund, setCompleteRefund] = useState(null);
+    // How the incoming payment is split across purchases: [{transactionId, amount, complete}]
+    const [allocations, setAllocations] = useState([]);
     const [incomingMode, setIncomingMode] = useState(false);
     const [incomingSearch, setIncomingSearch] = useState('');
     const [selectedIncomingId, setSelectedIncomingId] = useState('');
@@ -86,10 +86,9 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setSelectedProjectSubcategory(currentTransaction?.projectSubcategory || '');
         setRefundMode(false);
         setRefundSearch('');
-        setSelectedRefundId(currentTransaction?.refundOfTransactionId || '');
+        setAllocations([]);
         setAwaitingRefund(!!currentTransaction?.awaitingRefund);
         setExpectedRefundAmount(currentTransaction?.expectedRefundAmount != null ? String(currentTransaction.expectedRefundAmount) : '');
-        setCompleteRefund(null);
         setIncomingMode(false);
         setIncomingSearch('');
         setSelectedIncomingId('');
@@ -148,20 +147,29 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             .sort((a, b) => Math.abs(a.amount - outstandingRefund) - Math.abs(b.amount - outstandingRefund) || a.date.localeCompare(b.date))
             .slice(0, 30)
         : [];
-    // «Ferdig refundert» default: on when this payment covers the rest. Only a
-    // default — several people may refund one purchase (cinema tickets), and a
-    // partner may pay back less than expected.
-    const selectedOriginal = allTransactions.find(t => t.id === selectedRefundId);
-    const defaultComplete = (() => {
-        if (currentTransaction.type === 'income') {
-            if (!selectedOriginal?.awaitingRefund) return true;
-            const info = refundStatus(selectedOriginal, allTransactions);
-            return info.refunded + currentTransaction.amount >= info.expected - 0.5;
+    // The payment being split: the row itself (income side) or the chosen
+    // incoming row (purchase side).
+    const allocIncome = currentTransaction.type === 'income'
+        ? currentTransaction
+        : (allTransactions.find(t => t.id === selectedIncomingId) || null);
+    // Purchases the payment can be spread over — waiting ones first.
+    const splitCandidates = allocIncome
+        ? allTransactions
+            .filter(t => t.type === 'expense' && t.date <= allocIncome.date)
+            .sort((a, b) => (b.awaitingRefund ? 1 : 0) - (a.awaitingRefund ? 1 : 0) || b.date.localeCompare(a.date))
+        : [];
+    const toggleAllocation = (t) => {
+        if (allocations.some(a => a.transactionId === t.id)) {
+            setAllocations(allocations.filter(a => a.transactionId !== t.id));
+            return;
         }
-        const incoming = allTransactions.find(t => t.id === selectedIncomingId);
-        return incoming ? refundInfo.refunded + incoming.amount >= refundInfo.expected - 0.5 : true;
-    })();
-    const completeValue = completeRefund ?? defaultComplete;
+        const info = refundStatus(t, allTransactions);
+        const want = t.awaitingRefund ? Math.max(0, info.expected - info.refunded) : t.amount;
+        const room = Math.max(0, (allocIncome?.amount || 0) - allocations.reduce((sum, a) => sum + parseAmount(a.amount), 0));
+        const amount = room > 0 ? Math.min(want, room) : want;
+        setAllocations([...allocations, { transactionId: t.id, amount: String(Math.round(amount * 100) / 100), complete: null }]);
+    };
+    const allocationsOk = !!allocIncome && allocationsValid(allocations, allocIncome.amount);
 
     // Budget items are the library defs eligible for the SELECTED budget's scope.
     const selectedBudget = budgets.find(b => b.id === selectedBudgetId);
@@ -265,33 +273,33 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     // A credit note inherits the original's budget placement and split flags so
     // the two net out everywhere the original counted: the budget item's actual,
     // oppgjør (payer/utlegg/exclusion) and any project.
-    // A credit note / refund inherits the original's budget placement and split
-    // flags so the two net out everywhere the original counted (done in
-    // BudgetContext.linkRefund). completeValue closes the purchase's
-    // «venter refusjon» state.
-    const handleLinkRefund = async () => {
-        if (!selectedRefundId) return;
+    // Registers the payment as refund of the allocated purchase(s). One
+    // purchase covering the whole amount = a plain link; otherwise the payment
+    // is split into one refund row per purchase (BudgetContext.linkRefundSplit)
+    // so every sum stays exact per budget line. `advance` moves on to the next
+    // row (income side); the purchase side stays put so more can be attached.
+    const handleLinkAllocations = async (advance) => {
+        if (!allocationsOk) return;
         try {
-            await linkRefund(currentTransaction.id, selectedRefundId, { complete: completeValue, comment });
-            nextTransaction();
+            const allocs = allocations.map(a => ({
+                transactionId: a.transactionId,
+                amount: parseAmount(a.amount),
+                complete: allocationComplete(a, allTransactions.find(t => t.id === a.transactionId), allTransactions),
+            }));
+            if (allocs.length === 1) {
+                await linkRefund(allocIncome.id, allocs[0].transactionId, {
+                    complete: allocs[0].complete,
+                    ...(currentTransaction.type === 'income' && { comment }),
+                });
+            } else {
+                await linkRefundSplit(allocIncome.id, allocs);
+            }
+            if (allocs.some(a => a.transactionId === currentTransaction.id && a.complete)) setAwaitingRefund(false);
+            if (advance) nextTransaction();
+            else { setAllocations([]); setSelectedIncomingId(''); setIncomingMode(false); }
         } catch (error) {
             console.error("Failed to link refund", error);
-            alert("Kunne ikke registrere retur.");
-        }
-    };
-    // Purchase side: attach an incoming payment to THIS purchase. Stays on the
-    // row (no advance) so more payments can be attached.
-    const handleLinkIncoming = async () => {
-        if (!selectedIncomingId) return;
-        try {
-            await linkRefund(selectedIncomingId, currentTransaction.id, { complete: completeValue });
-            if (completeValue) setAwaitingRefund(false);
-            setSelectedIncomingId('');
-            setCompleteRefund(null);
-            setIncomingMode(false);
-        } catch (error) {
-            console.error("Failed to link incoming refund", error);
-            alert("Kunne ikke knytte refusjonen.");
+            alert(error?.message || "Kunne ikke registrere refusjonen.");
         }
     };
     const handleMarkRefundComplete = async () => {
@@ -303,8 +311,10 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             alert("Kunne ikke oppdatere.");
         }
     };
-    const handleUnlinkRefund = async (incomeId) => {
-        try { await unlinkRefund(incomeId); }
+    const handleUnlinkRefund = async (row) => {
+        const isSplit = !!row.refundParentId;
+        if (isSplit && !window.confirm('Denne innbetalingen er fordelt på flere kjøp. Fjerne hele fordelingen? Innbetalingen blir uavstemt igjen.')) return;
+        try { await unlinkRefund(row.id); }
         catch (error) {
             console.error("Failed to unlink refund", error);
             alert("Kunne ikke fjerne koblingen.");
@@ -564,11 +574,11 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                     <div key={r.id} className="flex items-center justify-between gap-2 text-sm bg-white dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-100 dark:border-gray-700">
                                         <span className="min-w-0">
                                             <span className="block truncate text-gray-900 dark:text-gray-100">{r.name}</span>
-                                            <span className="block text-xs text-gray-500 dark:text-gray-400">{r.date}</span>
+                                            <span className="block text-xs text-gray-500 dark:text-gray-400">{r.date}{r.refundParentId ? ' • del av en fordelt innbetaling' : ''}</span>
                                         </span>
                                         <span className="flex items-center gap-2 whitespace-nowrap">
                                             <span className="font-semibold text-green-600 dark:text-green-400">+{r.amount.toLocaleString('no-NO')} kr</span>
-                                            <button onClick={() => handleUnlinkRefund(r.id)} title="Fjern koblingen — innbetalingen blir uavstemt igjen" className="p-1 text-gray-400 hover:text-red-600 rounded"><X className="w-3.5 h-3.5" /></button>
+                                            <button onClick={() => handleUnlinkRefund(r)} title="Fjern koblingen — innbetalingen blir uavstemt igjen" className="p-1 text-gray-400 hover:text-red-600 rounded"><X className="w-3.5 h-3.5" /></button>
                                         </span>
                                     </div>
                                 ))}
@@ -585,7 +595,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                 <input
                                                     type="text"
                                                     value={incomingSearch}
-                                                    onChange={(e) => { setIncomingSearch(e.target.value); setSelectedIncomingId(''); setCompleteRefund(null); }}
+                                                    onChange={(e) => { setIncomingSearch(e.target.value); setSelectedIncomingId(''); setAllocations([]); }}
                                                     placeholder="Søk i innkommende..."
                                                     className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white outline-none focus:ring-2 focus:ring-teal-400"
                                                 />
@@ -596,7 +606,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                     {incomingCandidates.map(t => {
                                                         const tAccount = accounts.find(a => a.id === t.accountId);
                                                         return (
-                                                            <button key={t.id} onClick={() => { setSelectedIncomingId(t.id === selectedIncomingId ? '' : t.id); setCompleteRefund(null); }} className={clsx(
+                                                            <button key={t.id} onClick={() => { const next = t.id === selectedIncomingId ? '' : t.id; setSelectedIncomingId(next); setAllocations(next ? [{ transactionId: currentTransaction.id, amount: String(Math.round(Math.min(outstandingRefund || t.amount, t.amount) * 100) / 100), complete: null }] : []); }} className={clsx(
                                                                 "w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors",
                                                                 selectedIncomingId === t.id ? "bg-teal-100 dark:bg-teal-900/40" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"
                                                             )}>
@@ -609,14 +619,19 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                         );
                                                     })}
                                                 </div>
-                                                {selectedIncomingId && (
-                                                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                                                        <input type="checkbox" checked={completeValue} onChange={(e) => setCompleteRefund(e.target.checked)} className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500 dark:bg-gray-700 dark:border-gray-600" />
-                                                        Ferdig refundert etter denne — kjøpet venter ikke på flere innbetalinger
-                                                    </label>
+                                                {allocIncome && (
+                                                    <RefundAllocationEditor
+                                                        income={allocIncome}
+                                                        allocations={allocations}
+                                                        onChange={setAllocations}
+                                                        candidates={splitCandidates}
+                                                        allTransactions={allTransactions}
+                                                        accounts={accounts}
+                                                        lockedIds={[currentTransaction.id]}
+                                                    />
                                                 )}
-                                                <button onClick={handleLinkIncoming} disabled={!selectedIncomingId} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
-                                                    <Check className="w-4 h-4" />Knytt som refusjon
+                                                <button onClick={() => handleLinkAllocations(false)} disabled={!allocationsOk} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
+                                                    <Check className="w-4 h-4" />{allocations.length > 1 ? `Knytt og fordel på ${allocations.length} kjøp` : 'Knytt som refusjon'}
                                                 </button>
                                             </div>
                                         )}
@@ -638,12 +653,12 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                 {refundMode && (
                                     <div className="border border-teal-200 dark:border-teal-800 rounded-xl p-3 space-y-2 bg-teal-50/50 dark:bg-teal-900/10">
                                         <p className="text-xs text-gray-600 dark:text-gray-400">
-                                            Velg kjøpet pengene er retur for. Returen arver budsjettpost og kategori fra kjøpet, slik at beløpene nettes mot hverandre — også på tvers av måneder.
+                                            Velg kjøpet — eller kjøpene — innbetalingen dekker. Returen arver budsjettpost og kategori fra kjøpet, slik at beløpene nettes mot hverandre, også på tvers av måneder. Kjøp som venter på refusjon ligger øverst.
                                         </p>
                                         <input
                                             type="text"
                                             value={refundSearch}
-                                            onChange={(e) => { setRefundSearch(e.target.value); setSelectedRefundId(''); }}
+                                            onChange={(e) => setRefundSearch(e.target.value)}
                                             placeholder="Søk i tidligere kjøp..."
                                             className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white outline-none focus:ring-2 focus:ring-teal-400"
                                         />
@@ -653,13 +668,14 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                             )}
                                             {refundCandidates.map(t => {
                                                 const tAccount = accounts.find(a => a.id === t.accountId);
+                                                const picked = allocations.some(a => a.transactionId === t.id);
                                                 return (
-                                                    <button key={t.id} onClick={() => { setSelectedRefundId(t.id === selectedRefundId ? '' : t.id); setCompleteRefund(null); }} className={clsx(
+                                                    <button key={t.id} onClick={() => toggleAllocation(t)} className={clsx(
                                                         "w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors",
-                                                        selectedRefundId === t.id ? "bg-teal-100 dark:bg-teal-900/40" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                                                        picked ? "bg-teal-100 dark:bg-teal-900/40" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"
                                                     )}>
                                                         <span className="min-w-0">
-                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{picked ? '✓ ' : ''}{t.name}</span>
                                                             <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{tAccount ? ` • ${tAccount.name}` : ''}</span>
                                                             {t.awaitingRefund && (() => { const info = refundStatus(t, allTransactions); return (
                                                                 <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider">
@@ -672,14 +688,18 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                 );
                                             })}
                                         </div>
-                                        {selectedOriginal?.awaitingRefund && (
-                                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                                                <input type="checkbox" checked={completeValue} onChange={(e) => setCompleteRefund(e.target.checked)} className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500 dark:bg-gray-700 dark:border-gray-600" />
-                                                Ferdig refundert etter denne — kjøpet venter ikke på flere innbetalinger
-                                            </label>
+                                        {allocations.length > 0 && (
+                                            <RefundAllocationEditor
+                                                income={currentTransaction}
+                                                allocations={allocations}
+                                                onChange={setAllocations}
+                                                candidates={splitCandidates}
+                                                allTransactions={allTransactions}
+                                                accounts={accounts}
+                                            />
                                         )}
-                                        <button onClick={handleLinkRefund} disabled={!selectedRefundId} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
-                                            <Check className="w-4 h-4" />Registrer som retur
+                                        <button onClick={() => handleLinkAllocations(true)} disabled={!allocationsOk} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
+                                            <Check className="w-4 h-4" />{allocations.length > 1 ? `Registrer som retur fordelt på ${allocations.length} kjøp` : 'Registrer som retur'}
                                         </button>
                                         <button onClick={handleUnlinkedRefund} className="w-full py-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-teal-600 dark:hover:text-teal-400">
                                             Fant ikke kjøpet? Registrer retur uten kobling

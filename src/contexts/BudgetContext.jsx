@@ -324,8 +324,11 @@ export function BudgetProvider({ children }) {
     const deleteTransaction = async (id) => {
         if (!activeBudgetId) return;
         try {
+            // A split refund's children only exist because of the parent.
+            const children = transactions.filter(t => t.refundParentId === id);
+            await Promise.all(children.map(c => api.deleteDocument('transactions', c.id)));
             await api.deleteDocument('transactions', id);
-            setTransactions(prev => prev.filter(t => t.id !== id));
+            setTransactions(prev => prev.filter(t => t.id !== id && t.refundParentId !== id));
         } catch (error) {
             console.error("Error deleting transaction:", error);
             throw error;
@@ -444,12 +447,75 @@ export function BudgetProvider({ children }) {
             : (closeOriginal && t.id === originalId ? { ...t, awaitingRefund: false } : t)));
     };
 
-    // Undoes a refund link. The income row goes back to «uavstemt» so it gets
-    // categorized properly; the purchase's awaitingRefund flag is left as-is.
-    const unlinkRefund = async (incomeId) => {
-        const patch = { isRefund: false, refundOfTransactionId: null, budgetItemId: null, reconciled: false };
-        await api.updateDocument('transactions', incomeId, patch);
-        setTransactions(prev => prev.map(t => t.id === incomeId ? { ...t, ...patch } : t));
+    // One payment covering several purchases (see utils/refunds.js): the bank
+    // row becomes a «fordelt» parent kept out of every sum, plus one child
+    // refund row per purchase carrying the allocated amount and the purchase's
+    // budget placement. Allocations must add up to the payment.
+    const linkRefundSplit = async (incomeId, allocs) => {
+        const income = transactions.find(t => t.id === incomeId);
+        if (!income) throw new Error('Fant ikke innbetalingen');
+        const total = allocs.reduce((s, a) => s + (a.amount || 0), 0);
+        if (Math.abs(total - income.amount) > 0.01) throw new Error('Fordelingen må summere til innbetalingen');
+        const children = [];
+        const closed = new Set();
+        for (const a of allocs) {
+            const original = transactions.find(t => t.id === a.transactionId);
+            if (!original) throw new Error('Fant ikke kjøpet');
+            const child = {
+                date: income.date,
+                month: income.month,
+                name: income.name,
+                amount: Math.round(a.amount * 100) / 100,
+                type: 'income',
+                accountId: income.accountId,
+                budgetId: original.budgetId || income.budgetId,
+                budgetItemId: original.budgetItemId || null,
+                category: original.category || 'Retur',
+                projectId: original.projectId || null,
+                projectSubcategory: original.projectSubcategory || null,
+                payer: original.payer || null,
+                paidPrivatelyBy: original.paidPrivatelyBy || null,
+                excludeFromSharedCalc: !!original.excludeFromSharedCalc,
+                coveredByAccountId: original.coveredByAccountId || null,
+                isRefund: true,
+                refundOfTransactionId: original.id,
+                refundParentId: income.id,
+                source: 'refund-split',
+                reconciled: true,
+                createdAt: new Date().toISOString(),
+            };
+            const ref = await api.addDocument('transactions', child);
+            children.push({ id: ref.id, ...child });
+            if (a.complete && original.awaitingRefund) {
+                await api.updateDocument('transactions', original.id, { awaitingRefund: false });
+                closed.add(original.id);
+            }
+        }
+        const parentPatch = {
+            isRefund: true, refundSplit: true, refundOfTransactionId: null, budgetItemId: null,
+            category: 'Retur (fordelt)', reconciled: reconcilesOnLink(income),
+        };
+        await api.updateDocument('transactions', incomeId, parentPatch);
+        setTransactions(prev => [
+            ...prev.map(t => t.id === incomeId ? { ...t, ...parentPatch } : (closed.has(t.id) ? { ...t, awaitingRefund: false } : t)),
+            ...children.filter(c => c.budgetId === activeBudgetId),
+        ]);
+    };
+
+    // Undoes a refund link. Given a child of a split, the whole split is undone
+    // (children deleted). The income row goes back to «uavstemt» so it gets
+    // categorized properly; the purchases' awaitingRefund flags are left as-is.
+    const unlinkRefund = async (id) => {
+        const row = transactions.find(t => t.id === id);
+        const parent = row?.refundParentId ? transactions.find(t => t.id === row.refundParentId) : row;
+        if (!parent) throw new Error('Fant ikke innbetalingen');
+        const children = transactions.filter(t => t.refundParentId === parent.id);
+        await Promise.all(children.map(c => api.deleteDocument('transactions', c.id)));
+        const patch = { isRefund: false, refundSplit: false, refundOfTransactionId: null, budgetItemId: null, reconciled: false };
+        await api.updateDocument('transactions', parent.id, patch);
+        setTransactions(prev => prev
+            .filter(t => t.refundParentId !== parent.id)
+            .map(t => t.id === parent.id ? { ...t, ...patch } : t));
     };
 
     // --- Receipts (grocery line items from the companion app) ---
@@ -942,6 +1008,7 @@ export function BudgetProvider({ children }) {
         deleteTransactions,
         mergeTransactions,
         linkRefund,
+        linkRefundSplit,
         unlinkRefund,
         reloadTransactions,
         bankBalances,

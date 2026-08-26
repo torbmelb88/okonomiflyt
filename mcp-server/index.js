@@ -48,6 +48,7 @@ async function queryEq(name, filters) {
 const EXCLUDED_CATEGORIES = ['kredittkortregning', 'sparing', 'overføring', 'intern overføring'];
 
 function isMoneyMovement(t, expensesById) {
+    if (t.refundSplit) return true; // a split refund's parent is represented by its children
     const category = (t.category || '').trim().toLowerCase();
     if (EXCLUDED_CATEGORIES.includes(category)) return true;
     if (t.budgetItemId) {
@@ -93,6 +94,8 @@ function txView(t, accountsById, expensesById, budgetsById) {
     if (t.coveredByAccountId) view.coveredByAccount = accountsById.get(t.coveredByAccountId)?.name || t.coveredByAccountId;
     if (t.payer && t.payer !== 'shared') view.payer = t.payer;
     if (t.isRefund) view.isRefund = true;
+    if (t.refundSplit) view.refundSplit = true; // parent of a refund split across purchases; its children carry the amounts
+    if (t.refundParentId) view.refundParentId = t.refundParentId;
     if (t.awaitingRefund) { view.awaitingRefund = true; view.expectedRefundAmount = t.expectedRefundAmount ?? null; }
     if (t.isUnnecessary) view.isUnnecessary = true;
     if (t.projectId) { view.projectId = t.projectId; view.projectSubcategory = t.projectSubcategory || null; }

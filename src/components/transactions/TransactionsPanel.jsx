@@ -109,6 +109,8 @@ export default function TransactionsPanel({
     );
 
     const isExcludedFromSummary = (t) => {
+        // A split refund's parent is represented by its children
+        if (t.refundSplit) return true;
         const normalize = (str) => (str ? str.trim().toLowerCase() : '');
         const category = normalize(t.category);
         if (['kredittkortregning', 'sparing', 'overføring', 'intern overføring'].includes(category)) return true;
@@ -335,6 +337,7 @@ export default function TransactionsPanel({
                             const hasReceipt = !!trans.receiptId || receipts.some(r => r.transactionId === trans.id);
                             const refundOriginal = trans.isRefund && trans.refundOfTransactionId ? transactions.find(t => t.id === trans.refundOfTransactionId) : null;
                             const refundedAmount = refundedByOriginal.get(trans.id) || 0;
+                            const splitChildren = trans.refundSplit ? transactions.filter(t => t.refundParentId === trans.id).length : 0;
                             const refundExpected = trans.expectedRefundAmount > 0 ? trans.expectedRefundAmount : trans.amount;
                             return (
                                 <div key={trans.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group">
@@ -371,9 +374,14 @@ export default function TransactionsPanel({
                                                 {trans.paidPrivatelyBy && (
                                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider">Utlegg</span>
                                                 )}
-                                                {trans.isRefund && (
-                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Retur av ${refundOriginal.name} (${refundOriginal.date})` : 'Retur / kreditnota'}>
-                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Retur{refundOriginal ? ` av ${refundOriginal.name}` : ''}
+                                                {trans.refundSplit && (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title="Innbetalingen er fordelt på flere kjøp — beløpet telles via de fordelte radene, ikke denne">
+                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Fordelt på {splitChildren} kjøp
+                                                    </span>
+                                                )}
+                                                {trans.isRefund && !trans.refundSplit && (
+                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Retur av ${refundOriginal.name} (${refundOriginal.date})${trans.refundParentId ? ' — del av en fordelt innbetaling' : ''}` : 'Retur / kreditnota'}>
+                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Retur{refundOriginal ? ` av ${refundOriginal.name}` : ''}{trans.refundParentId ? ' (del)' : ''}
                                                     </span>
                                                 )}
                                                 {trans.awaitingRefund && (

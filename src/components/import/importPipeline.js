@@ -36,6 +36,7 @@ export const matchRowsAgainstExisting = async ({ rows, existing, updateTransacti
             // SEK/EUR/…, so an equal number is coincidence — link manually
             // via merge instead of dropping the bank row here.
             const duplicate = existing.find(t =>
+                !t.refundParentId && // split-refund children mirror a bank row, they are not one
                 (!t.currency || t.currency === 'NOK') &&
                 datesAreClose(t.date, date) &&
                 Math.abs(Math.abs(t.amount) - Math.abs(amount)) < 0.01 &&

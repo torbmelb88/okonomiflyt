@@ -155,6 +155,7 @@ export default function MyOverview() {
                 // Expenses count; credit notes/refunds count negatively. Other
                 // income on the card (e.g. bill payments) is ignored.
                 if (t.type !== 'expense' && !(t.type === 'income' && t.isRefund)) return false;
+                if (t.refundSplit) return false; // represented by its split children
                 // Held out of the transfer calc, or covered from another account
                 if (t.excludeFromSharedCalc || t.coveredByAccountId) return false;
                 // Must be linked to a Credit Card account
@@ -207,6 +208,7 @@ export default function MyOverview() {
                 if (t.month !== prevMonthStr) return false;
                 if (!billIds.has(t.accountId)) return false;
                 if (t.type !== 'expense' && !(t.type === 'income' && t.isRefund)) return false;
+                if (t.refundSplit) return false; // represented by its split children
                 // «Hold kostnad utenfor» excludes it from the top-up transfer,
                 // whether or not another covering account was specified
                 if (t.excludeFromSharedCalc || t.coveredByAccountId) return false;
@@ -239,7 +241,7 @@ export default function MyOverview() {
         let spending = 0, otherIncome = 0;
         for (const t of transactions) {
             if (t.month !== selectedMonth || !ids.has(t.accountId)) continue;
-            if (isMoneyMovement(t) || t.coveredByAccountId) continue;
+            if (isMoneyMovement(t) || t.coveredByAccountId || t.refundSplit) continue;
             const amount = parseFloat(t.amount) || 0;
             if (t.type === 'expense') spending += amount;
             else if (t.type === 'income' && t.isRefund) spending -= amount;
