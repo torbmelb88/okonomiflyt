@@ -87,6 +87,11 @@ function txView(t, accountsById, expensesById, budgetsById) {
         reconcileState: reconcileState(t),
     };
     if (t.paidPrivatelyBy) view.paidPrivatelyBy = t.paidPrivatelyBy;
+    // Oppgjør flags (mirror Oppgjor.jsx): excluded rows never enter the split;
+    // coveredByAccount says which account footed the bill; payer overrides the split.
+    if (t.excludeFromSharedCalc) view.excludeFromSharedCalc = true;
+    if (t.coveredByAccountId) view.coveredByAccount = accountsById.get(t.coveredByAccountId)?.name || t.coveredByAccountId;
+    if (t.payer && t.payer !== 'shared') view.payer = t.payer;
     if (t.isRefund) view.isRefund = true;
     if (t.isUnnecessary) view.isUnnecessary = true;
     if (t.projectId) { view.projectId = t.projectId; view.projectSubcategory = t.projectSubcategory || null; }
@@ -129,6 +134,7 @@ function buildServer() {
                 name: a.name,
                 type: a.type,
                 isBillAccount: !!a.isBillAccount,
+                excludeFromSharedCalc: !!a.excludeFromSharedCalc, // whole account kept out of the settlement split
                 cardLastFour: a.cardLastFour || null,
                 defaultBudget: budgetsById.get(a.defaultBudgetId || a.budgetId)?.name || null,
                 balance: bank?.balance ?? null,
@@ -243,7 +249,7 @@ function buildServer() {
 
     server.registerTool('list_transactions', {
         title: 'List transactions',
-        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
+        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM. Strongly recommended to limit the result.'),
             budgetId: z.string().optional(),
