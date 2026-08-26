@@ -366,6 +366,10 @@ export function BudgetProvider({ children }) {
             payer: prefer('payer'),
             isRefund: !!(keep.isRefund || remove.isRefund),
             refundOfTransactionId: prefer('refundOfTransactionId'),
+            // A purchase logged as «refunderes» must keep waiting after the
+            // bank copy merges into it.
+            awaitingRefund: !!(keep.awaitingRefund || remove.awaitingRefund),
+            expectedRefundAmount: prefer('expectedRefundAmount'),
             // The pair was matched against the bank, so the survivor carries
             // the bank-side identity (externalId/source) even when the kept
             // copy is the self-reported one — the next import then recognizes
@@ -405,6 +409,47 @@ export function BudgetProvider({ children }) {
             .map(t => t.id === keepId
                 ? { ...t, ...patch }
                 : (t.refundOfTransactionId === removeId ? { ...t, refundOfTransactionId: keepId } : t)));
+    };
+
+    // Registers `incomeId` as a refund of `originalId` (see utils/refunds.js).
+    // The refund inherits the original's budget placement and split flags so
+    // the two net out everywhere the original counted. `complete` clears the
+    // original's awaitingRefund flag — always the user's explicit call, never
+    // inferred from amounts: a partner may pay back less (or more) than
+    // expected, and several people may refund one purchase.
+    const linkRefund = async (incomeId, originalId, { complete = false, comment } = {}) => {
+        const income = transactions.find(t => t.id === incomeId);
+        const original = transactions.find(t => t.id === originalId);
+        if (!income || !original) throw new Error('Fant ikke begge transaksjonene');
+        const patch = {
+            reconciled: reconcilesOnLink(income),
+            isRefund: true,
+            refundOfTransactionId: original.id,
+            budgetId: original.budgetId || income.budgetId,
+            budgetItemId: original.budgetItemId || null,
+            category: original.category || 'Retur',
+            projectId: original.projectId || null,
+            projectSubcategory: original.projectSubcategory || null,
+            payer: original.payer || null,
+            paidPrivatelyBy: original.paidPrivatelyBy || null,
+            excludeFromSharedCalc: !!original.excludeFromSharedCalc,
+            coveredByAccountId: original.coveredByAccountId || null,
+            ...(comment !== undefined && { comment }),
+        };
+        await api.updateDocument('transactions', incomeId, patch);
+        const closeOriginal = complete && !!original.awaitingRefund;
+        if (closeOriginal) await api.updateDocument('transactions', originalId, { awaitingRefund: false });
+        setTransactions(prev => prev.map(t => t.id === incomeId
+            ? { ...t, ...patch }
+            : (closeOriginal && t.id === originalId ? { ...t, awaitingRefund: false } : t)));
+    };
+
+    // Undoes a refund link. The income row goes back to «uavstemt» so it gets
+    // categorized properly; the purchase's awaitingRefund flag is left as-is.
+    const unlinkRefund = async (incomeId) => {
+        const patch = { isRefund: false, refundOfTransactionId: null, budgetItemId: null, reconciled: false };
+        await api.updateDocument('transactions', incomeId, patch);
+        setTransactions(prev => prev.map(t => t.id === incomeId ? { ...t, ...patch } : t));
     };
 
     // --- Receipts (grocery line items from the companion app) ---
@@ -896,6 +941,8 @@ export function BudgetProvider({ children }) {
         deleteTransaction,
         deleteTransactions,
         mergeTransactions,
+        linkRefund,
+        unlinkRefund,
         reloadTransactions,
         bankBalances,
         linkTransactionToBudgetItem,

@@ -74,6 +74,7 @@ export default function TransactionsPanel({
         { key: 'creditcard', label: 'Kredittkort', Icon: CreditCard, test: (t) => creditCardIds.has(t.accountId) },
         { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t) },
         { key: 'booked', label: 'Venter avstemming', Icon: null, test: (t) => reconcileState(t) === 'booked' },
+        { key: 'awaitingRefund', label: 'Venter refusjon', Icon: null, test: (t) => !!t.awaitingRefund },
         { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy },
         { key: 'receipt', label: 'Kvittering', Icon: ReceiptText, test: (t) => !!t.receiptId || receipts.some(r => r.transactionId === t.id) },
     ];
@@ -333,7 +334,8 @@ export default function TransactionsPanel({
                             const linkedProject = trans.projectId ? projects.find(p => p.id === trans.projectId) : null;
                             const hasReceipt = !!trans.receiptId || receipts.some(r => r.transactionId === trans.id);
                             const refundOriginal = trans.isRefund && trans.refundOfTransactionId ? transactions.find(t => t.id === trans.refundOfTransactionId) : null;
-                            const refundedAmount = refundedByOriginal.get(trans.id);
+                            const refundedAmount = refundedByOriginal.get(trans.id) || 0;
+                            const refundExpected = trans.expectedRefundAmount > 0 ? trans.expectedRefundAmount : trans.amount;
                             return (
                                 <div key={trans.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group">
                                     <div className="flex items-center space-x-4">
@@ -374,9 +376,14 @@ export default function TransactionsPanel({
                                                         <Undo2 className="w-3 h-3 flex-shrink-0" />Retur{refundOriginal ? ` av ${refundOriginal.name}` : ''}
                                                     </span>
                                                 )}
-                                                {refundedAmount > 0 && (
-                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title="Hele eller deler av beløpet er returnert">
-                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />{refundedAmount.toLocaleString('no-NO')} kr returnert
+                                                {trans.awaitingRefund && (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title={`Venter på innkommende refusjon (Vipps e.l.). Forventet ${refundExpected.toLocaleString('no-NO')} kr${refundedAmount > 0 ? `, mottatt ${refundedAmount.toLocaleString('no-NO')} kr` : ''}. Knytt innbetalingen i avstemmingsdialogen.`}>
+                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Venter refusjon{refundedAmount > 0 ? ` · ${refundedAmount.toLocaleString('no-NO')} av ${refundExpected.toLocaleString('no-NO')}` : ''}
+                                                    </span>
+                                                )}
+                                                {!trans.awaitingRefund && refundedAmount > 0 && (
+                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundedAmount > trans.amount ? 'Mer refundert enn kjøpet kostet — overskytende gjør netto negativt' : 'Hele eller deler av beløpet er refundert'}>
+                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />{refundedAmount.toLocaleString('no-NO')} kr refundert{refundedAmount > trans.amount ? ' (overrefundert)' : ''}
                                                     </span>
                                                 )}
                                                 {hasReceipt && (

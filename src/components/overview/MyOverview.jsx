@@ -6,6 +6,7 @@ import { ArrowRight, Wallet, CreditCard, PiggyBank, Calculator, Info, Landmark }
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
 import LiquidityCard from './LiquidityCard';
+import { refundStatus } from '../../utils/refunds';
 
 export default function MyOverview() {
     const { activeBudget, budgets, transactions, accounts, isMonthReconciled } = useBudget();
@@ -247,6 +248,16 @@ export default function MyOverview() {
         return { spending: Math.round(spending), otherIncome: Math.round(otherIncome) };
     }, [transactions, selectedMonth, checkingAccounts, activeBudget]);
 
+    // Refunds still expected on this month's purchases (a partner's Vipps
+    // etc.). Informational: the purchase is already deducted in full above,
+    // and the incoming payment nets it out once it is linked.
+    const pendingRefunds = useMemo(() => {
+        if (!Array.isArray(transactions)) return 0;
+        return Math.round(transactions
+            .filter(t => t.awaitingRefund && t.type === 'expense' && t.month === selectedMonth)
+            .reduce((s, t) => { const r = refundStatus(t, transactions); return s + Math.max(0, r.expected - r.refunded); }, 0));
+    }, [transactions, selectedMonth]);
+
     // --- RENDER ---
     if (!activeBudget) return null;
 
@@ -457,6 +468,7 @@ export default function MyOverview() {
                         selectedMonth={selectedMonth}
                         formatMonth={formatMonth}
                         monthReconciled={isMonthReconciled(selectedMonth)}
+                        pendingRefunds={pendingRefunds}
                     />
 
                     <UnnecessaryPurchasesCard

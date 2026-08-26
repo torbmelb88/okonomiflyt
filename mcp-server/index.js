@@ -93,6 +93,7 @@ function txView(t, accountsById, expensesById, budgetsById) {
     if (t.coveredByAccountId) view.coveredByAccount = accountsById.get(t.coveredByAccountId)?.name || t.coveredByAccountId;
     if (t.payer && t.payer !== 'shared') view.payer = t.payer;
     if (t.isRefund) view.isRefund = true;
+    if (t.awaitingRefund) { view.awaitingRefund = true; view.expectedRefundAmount = t.expectedRefundAmount ?? null; }
     if (t.isUnnecessary) view.isUnnecessary = true;
     if (t.projectId) { view.projectId = t.projectId; view.projectSubcategory = t.projectSubcategory || null; }
     if (t.currency && t.currency !== 'NOK') view.currency = t.currency; // amount is still in this currency (awaiting bank confirmation)
@@ -171,7 +172,7 @@ function buildServer() {
 
     server.registerTool('get_month_summary', {
         title: 'Get month summary',
-        description: 'Budget vs. actual for a month, per budget: income, spending (refunds deducted), each budget line with budgeted and actual amount, unbudgeted spending grouped by category, and reconciliation status. Money movement (savings transfers, credit card bill payments, internal transfers) is excluded from the income/spending totals but savings lines still appear in the line list. pendingTransactions counts rows not fully settled: awaitingBankMatch = self-reported rows waiting for their bank copy, uncategorized = rows without a budget line. Note: numbers for a month are only authoritative once reconciled=true.',
+        description: 'Budget vs. actual for a month, per budget: income, spending (refunds deducted), each budget line with budgeted and actual amount, unbudgeted spending grouped by category, and reconciliation status. Money movement (savings transfers, credit card bill payments, internal transfers) is excluded from the income/spending totals but savings lines still appear in the line list. pendingTransactions counts rows not fully settled: awaitingBankMatch = self-reported rows waiting for their bank copy, uncategorized = rows without a budget line, awaitingRefund = purchases still waiting for an incoming refund (Vipps etc.) to be linked. Note: numbers for a month are only authoritative once reconciled=true.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM, defaults to the current month'),
             budgetId: z.string().optional().describe('Limit to one budget; omit for all budgets'),
@@ -237,6 +238,7 @@ function buildServer() {
                 pendingTransactions: {
                     awaitingBankMatch: txs.filter(t => reconcileState(t) === 'booked').length,
                     uncategorized: txs.filter(t => reconcileState(t) === 'unreconciled').length,
+                    awaitingRefund: txs.filter(t => t.awaitingRefund).length,
                 },
                 lines,
                 unbudgetedByCategory: Object.fromEntries(
@@ -249,7 +251,7 @@ function buildServer() {
 
     server.registerTool('list_transactions', {
         title: 'List transactions',
-        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
+        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM. Strongly recommended to limit the result.'),
             budgetId: z.string().optional(),

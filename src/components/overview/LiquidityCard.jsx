@@ -8,7 +8,7 @@ import { Activity, CheckCircle2, Clock } from 'lucide-react';
  * Updates as transactions land; only final once the month is over and
  * reconciled, so the card says which of the two it is.
  */
-export default function LiquidityCard({ leftToSpend, checkingSpending, checkingOtherIncome, checkingAccounts, selectedMonth, formatMonth, monthReconciled }) {
+export default function LiquidityCard({ leftToSpend, checkingSpending, checkingOtherIncome, checkingAccounts, selectedMonth, formatMonth, monthReconciled, pendingRefunds = 0 }) {
     const result = leftToSpend - checkingSpending + checkingOtherIncome;
     const positive = result >= 0;
     const names = checkingAccounts.map(a => a.name).join(', ') || 'brukskonto';
@@ -43,6 +43,12 @@ export default function LiquidityCard({ leftToSpend, checkingSpending, checkingO
                         <div className="flex justify-between text-sm">
                             <span className="text-gray-600 dark:text-gray-400">+ Andre inntekter på {names}</span>
                             <span className="font-medium text-gray-900 dark:text-white">+ {checkingOtherIncome.toLocaleString('no-NO')} kr</span>
+                        </div>
+                    )}
+                    {pendingRefunds > 0 && (
+                        <div className="flex justify-between text-xs text-teal-600 dark:text-teal-400" title="Kjøp merket «refunderes» som ennå ikke har fått innbetalingen knyttet. Beløpet er trukket fra over, og kommer tilbake når refusjonen knyttes.">
+                            <span>Utestående refusjoner (ikke medregnet)</span>
+                            <span>{pendingRefunds.toLocaleString('no-NO')} kr</span>
                         </div>
                     )}
                     <div className="h-px bg-gray-100 dark:bg-gray-700 my-2"></div>

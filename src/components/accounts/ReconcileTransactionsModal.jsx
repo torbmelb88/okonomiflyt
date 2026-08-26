@@ -7,12 +7,14 @@ import InfoTip from '../common/InfoTip';
 import { findBudgetItemSuggestion } from '../../utils/textMatch';
 import { FOREIGN_CURRENCIES } from '../../utils/currency';
 import { reconcilesOnLink } from '../../utils/reconciliation';
+import { refundStatus, refundsOf } from '../../utils/refunds';
 import clsx from 'clsx';
 
 export default function ReconcileTransactionsModal({ isOpen, onClose, transactions, onComplete }) {
     const {
         expenses, budgetItemDefs, categories, ensureInstanceForDef,
         addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, transactions: allTransactions,
+        linkRefund, unlinkRefund,
     } = useBudget();
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedBudgetItemId, setSelectedBudgetItemId] = useState(''); // holds a def id
@@ -33,6 +35,14 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const [refundMode, setRefundMode] = useState(false);
     const [refundSearch, setRefundSearch] = useState('');
     const [selectedRefundId, setSelectedRefundId] = useState('');
+    // «Refunderes»: the purchase waits for one or more incoming payments.
+    const [awaitingRefund, setAwaitingRefund] = useState(false);
+    const [expectedRefundAmount, setExpectedRefundAmount] = useState('');
+    // null = use the computed default («covers the rest»); the user can override.
+    const [completeRefund, setCompleteRefund] = useState(null);
+    const [incomingMode, setIncomingMode] = useState(false);
+    const [incomingSearch, setIncomingSearch] = useState('');
+    const [selectedIncomingId, setSelectedIncomingId] = useState('');
     // '' = NOK. Saved immediately on change (like the date), so the flag can be
     // set retroactively on foreign purchases logged before currency detection.
     const [currency, setCurrency] = useState('');
@@ -77,6 +87,12 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setRefundMode(false);
         setRefundSearch('');
         setSelectedRefundId(currentTransaction?.refundOfTransactionId || '');
+        setAwaitingRefund(!!currentTransaction?.awaitingRefund);
+        setExpectedRefundAmount(currentTransaction?.expectedRefundAmount != null ? String(currentTransaction.expectedRefundAmount) : '');
+        setCompleteRefund(null);
+        setIncomingMode(false);
+        setIncomingSearch('');
+        setSelectedIncomingId('');
         setCurrency(currentTransaction?.currency && currentTransaction.currency !== 'NOK' ? currentTransaction.currency : '');
         // Default the budget to the account's default (overridable). For an
         // already-reconciled transaction, keep its stored budget so a prior
@@ -106,12 +122,46 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             .filter(t => !refundSearch || t.name.toLowerCase().includes(refundSearch.toLowerCase()))
             .sort((a, b) => {
                 const rank = (t) =>
+                    (t.awaitingRefund ? -10 : 0) +
                     (t.accountId === currentTransaction.accountId ? 0 : 4) +
                     (t.amount === currentTransaction.amount ? 0 : t.amount > currentTransaction.amount ? 1 : 2);
                 return rank(a) - rank(b) || b.date.localeCompare(a.date);
             })
             .slice(0, 30)
         : [];
+
+    // Live copy of the current row (the prop array is a snapshot) so refund
+    // status updates in place after linking from this dialog.
+    const liveTx = allTransactions.find(t => t.id === currentTransaction.id) || currentTransaction;
+    const refundInfo = refundStatus(liveTx, allTransactions);
+    const linkedRefunds = refundsOf(liveTx, allTransactions);
+    const outstandingRefund = Math.max(0, refundInfo.expected - refundInfo.refunded);
+    // Incoming candidates for a purchase awaiting refund: income rows not
+    // already registered as refunds, on/after the purchase date, closest to
+    // the outstanding amount first. Amounts need not match — a partner may
+    // pay back part of it, or round up.
+    const incomingCandidates = currentTransaction.type === 'expense'
+        ? allTransactions
+            .filter(t => t.type === 'income' && !t.isRefund && t.date >= currentTransaction.date &&
+                !['lønn', 'intern overføring', 'sparing', 'kredittkortregning'].includes((t.category || '').trim().toLowerCase()))
+            .filter(t => !incomingSearch || t.name.toLowerCase().includes(incomingSearch.toLowerCase()))
+            .sort((a, b) => Math.abs(a.amount - outstandingRefund) - Math.abs(b.amount - outstandingRefund) || a.date.localeCompare(b.date))
+            .slice(0, 30)
+        : [];
+    // «Ferdig refundert» default: on when this payment covers the rest. Only a
+    // default — several people may refund one purchase (cinema tickets), and a
+    // partner may pay back less than expected.
+    const selectedOriginal = allTransactions.find(t => t.id === selectedRefundId);
+    const defaultComplete = (() => {
+        if (currentTransaction.type === 'income') {
+            if (!selectedOriginal?.awaitingRefund) return true;
+            const info = refundStatus(selectedOriginal, allTransactions);
+            return info.refunded + currentTransaction.amount >= info.expected - 0.5;
+        }
+        const incoming = allTransactions.find(t => t.id === selectedIncomingId);
+        return incoming ? refundInfo.refunded + incoming.amount >= refundInfo.expected - 0.5 : true;
+    })();
+    const completeValue = completeRefund ?? defaultComplete;
 
     // Budget items are the library defs eligible for the SELECTED budget's scope.
     const selectedBudget = budgets.find(b => b.id === selectedBudgetId);
@@ -143,6 +193,13 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     };
     const nextTransaction = () => advance([currentTransaction.id]);
 
+    const refundFields = {
+        awaitingRefund: currentTransaction.type === 'expense' && awaitingRefund,
+        expectedRefundAmount: currentTransaction.type === 'expense' && awaitingRefund && expectedRefundAmount !== ''
+            ? (parseFloat(String(expectedRefundAmount).replace(',', '.')) || null)
+            : null,
+    };
+
     const handleLink = async () => {
         if (!selectedBudgetItemId) return;
         try {
@@ -161,7 +218,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                 coveredByAccountId: excludeFromSharedCalc ? (coveredByAccountId || null) : null,
                 projectId: selectedProjectId || null,
                 projectSubcategory: selectedProjectId ? (selectedProjectSubcategory || null) : null,
-                comment, paidPrivatelyBy,
+                comment, paidPrivatelyBy, ...refundFields,
             });
             nextTransaction();
         } catch (error) {
@@ -185,7 +242,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             isUnnecessary, excludeFromSharedCalc,
             projectId: selectedProjectId || null,
             projectSubcategory: selectedProjectId ? (selectedProjectSubcategory || null) : null,
-            comment, paidPrivatelyBy,
+            comment, paidPrivatelyBy, ...refundFields,
         });
         setIsAddOpen(false);
         nextTransaction();
@@ -208,29 +265,49 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     // A credit note inherits the original's budget placement and split flags so
     // the two net out everywhere the original counted: the budget item's actual,
     // oppgjør (payer/utlegg/exclusion) and any project.
+    // A credit note / refund inherits the original's budget placement and split
+    // flags so the two net out everywhere the original counted (done in
+    // BudgetContext.linkRefund). completeValue closes the purchase's
+    // «venter refusjon» state.
     const handleLinkRefund = async () => {
-        const original = allTransactions.find(t => t.id === selectedRefundId);
-        if (!original) return;
+        if (!selectedRefundId) return;
         try {
-            await updateTransaction(currentTransaction.id, {
-                reconciled: reconcilesOnLink(currentTransaction),
-                isRefund: true,
-                refundOfTransactionId: original.id,
-                budgetId: original.budgetId || selectedBudgetId,
-                budgetItemId: original.budgetItemId || null,
-                category: original.category || 'Retur',
-                projectId: original.projectId || null,
-                projectSubcategory: original.projectSubcategory || null,
-                payer: original.payer || null,
-                paidPrivatelyBy: original.paidPrivatelyBy || null,
-                excludeFromSharedCalc: !!original.excludeFromSharedCalc,
-                coveredByAccountId: original.coveredByAccountId || null,
-                comment,
-            });
+            await linkRefund(currentTransaction.id, selectedRefundId, { complete: completeValue, comment });
             nextTransaction();
         } catch (error) {
             console.error("Failed to link refund", error);
             alert("Kunne ikke registrere retur.");
+        }
+    };
+    // Purchase side: attach an incoming payment to THIS purchase. Stays on the
+    // row (no advance) so more payments can be attached.
+    const handleLinkIncoming = async () => {
+        if (!selectedIncomingId) return;
+        try {
+            await linkRefund(selectedIncomingId, currentTransaction.id, { complete: completeValue });
+            if (completeValue) setAwaitingRefund(false);
+            setSelectedIncomingId('');
+            setCompleteRefund(null);
+            setIncomingMode(false);
+        } catch (error) {
+            console.error("Failed to link incoming refund", error);
+            alert("Kunne ikke knytte refusjonen.");
+        }
+    };
+    const handleMarkRefundComplete = async () => {
+        try {
+            await updateTransaction(currentTransaction.id, { awaitingRefund: false });
+            setAwaitingRefund(false);
+        } catch (error) {
+            console.error("Failed to close refund", error);
+            alert("Kunne ikke oppdatere.");
+        }
+    };
+    const handleUnlinkRefund = async (incomeId) => {
+        try { await unlinkRefund(incomeId); }
+        catch (error) {
+            console.error("Failed to unlink refund", error);
+            alert("Kunne ikke fjerne koblingen.");
         }
     };
     const handleUnlinkedRefund = () => markAs({ category: 'Retur', isRefund: true });
@@ -357,6 +434,21 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                     </select>
                                 </div>
                             )}
+                            {currentTransaction.type === 'expense' && (
+                                <div className="flex items-center">
+                                    <input type="checkbox" id="awaitingRefund" checked={awaitingRefund} onChange={(e) => setAwaitingRefund(e.target.checked)} className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600" />
+                                    <label htmlFor="awaitingRefund" className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">Refunderes helt eller delvis 🔁
+                                        <InfoTip text="Du la ut, og noen skal betale deg tilbake (Vipps e.l.). Kjøpet telles fullt ut inntil innbetalingen knyttes til det — da nettes de. Flere innbetalinger kan knyttes til samme kjøp, og «Ferdig refundert» er alltid ditt eksplisitte valg." />
+                                    </label>
+                                </div>
+                            )}
+                            {currentTransaction.type === 'expense' && awaitingRefund && (
+                                <div className="ml-6 flex items-center gap-2 flex-wrap">
+                                    <label htmlFor="expectedRefundAmount" className="text-xs text-gray-600 dark:text-gray-400">Forventet beløp</label>
+                                    <input id="expectedRefundAmount" type="number" inputMode="decimal" min="0" step="0.01" value={expectedRefundAmount} onChange={(e) => setExpectedRefundAmount(e.target.value)} placeholder={`${currentTransaction.amount} (hele)`} className="w-32 text-sm px-2 py-1 border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-400 outline-none" />
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">kr — tomt = hele kjøpet</span>
+                                </div>
+                            )}
                             <div className="pt-1">
                                 <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Kommentar (valgfritt)" rows={2} className="w-full text-sm px-3 py-2 border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-400 outline-none resize-none" />
                             </div>
@@ -457,6 +549,81 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                             </button>
                         </div>
 
+                        {currentTransaction.type === 'expense' && (liveTx.awaitingRefund || linkedRefunds.length > 0) && (
+                            <div className="border border-teal-200 dark:border-teal-800 rounded-xl p-3 space-y-2 bg-teal-50/50 dark:bg-teal-900/10">
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-sm font-medium text-teal-800 dark:text-teal-200 flex items-center gap-1.5 flex-wrap">
+                                        <Undo2 className="w-4 h-4" />{liveTx.awaitingRefund ? 'Venter på refusjon' : 'Refundert'}
+                                        <span className="font-normal text-xs text-gray-600 dark:text-gray-400">· {refundInfo.refunded.toLocaleString('no-NO')} av {refundInfo.expected.toLocaleString('no-NO')} kr{refundInfo.over ? ' (overrefundert)' : ''}</span>
+                                    </p>
+                                    {liveTx.awaitingRefund && (
+                                        <button onClick={handleMarkRefundComplete} className="text-xs text-teal-700 dark:text-teal-300 hover:underline whitespace-nowrap" title="Kjøpet venter ikke på flere innbetalinger (f.eks. fikk du kontanter)">Ferdig refundert</button>
+                                    )}
+                                </div>
+                                {linkedRefunds.map(r => (
+                                    <div key={r.id} className="flex items-center justify-between gap-2 text-sm bg-white dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-100 dark:border-gray-700">
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-gray-900 dark:text-gray-100">{r.name}</span>
+                                            <span className="block text-xs text-gray-500 dark:text-gray-400">{r.date}</span>
+                                        </span>
+                                        <span className="flex items-center gap-2 whitespace-nowrap">
+                                            <span className="font-semibold text-green-600 dark:text-green-400">+{r.amount.toLocaleString('no-NO')} kr</span>
+                                            <button onClick={() => handleUnlinkRefund(r.id)} title="Fjern koblingen — innbetalingen blir uavstemt igjen" className="p-1 text-gray-400 hover:text-red-600 rounded"><X className="w-3.5 h-3.5" /></button>
+                                        </span>
+                                    </div>
+                                ))}
+                                {liveTx.awaitingRefund && (
+                                    <>
+                                        <button onClick={() => setIncomingMode(v => !v)} className={clsx(
+                                            "w-full py-2 rounded-lg text-sm font-medium transition-colors",
+                                            incomingMode ? "bg-teal-600 text-white" : "bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/40 text-teal-800 dark:text-teal-200"
+                                        )}>
+                                            Finn innkommende refusjon (Vipps e.l.)
+                                        </button>
+                                        {incomingMode && (
+                                            <div className="space-y-2">
+                                                <input
+                                                    type="text"
+                                                    value={incomingSearch}
+                                                    onChange={(e) => { setIncomingSearch(e.target.value); setSelectedIncomingId(''); setCompleteRefund(null); }}
+                                                    placeholder="Søk i innkommende..."
+                                                    className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white outline-none focus:ring-2 focus:ring-teal-400"
+                                                />
+                                                <div className="max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                                                    {incomingCandidates.length === 0 && (
+                                                        <p className="p-3 text-sm text-gray-500 dark:text-gray-400">Ingen innkommende transaksjoner fra {currentTransaction.date} og utover. Importer fra banken først.</p>
+                                                    )}
+                                                    {incomingCandidates.map(t => {
+                                                        const tAccount = accounts.find(a => a.id === t.accountId);
+                                                        return (
+                                                            <button key={t.id} onClick={() => { setSelectedIncomingId(t.id === selectedIncomingId ? '' : t.id); setCompleteRefund(null); }} className={clsx(
+                                                                "w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors",
+                                                                selectedIncomingId === t.id ? "bg-teal-100 dark:bg-teal-900/40" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                                                            )}>
+                                                                <span className="min-w-0">
+                                                                    <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                                                    <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{tAccount ? ` • ${tAccount.name}` : ''}{t.budgetItemId || t.category ? ` • ${t.category || 'kategorisert'}` : ' • uavstemt'}</span>
+                                                                </span>
+                                                                <span className="font-semibold text-green-600 dark:text-green-400 whitespace-nowrap">+{t.amount.toLocaleString('no-NO')} kr</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {selectedIncomingId && (
+                                                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                                        <input type="checkbox" checked={completeValue} onChange={(e) => setCompleteRefund(e.target.checked)} className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500 dark:bg-gray-700 dark:border-gray-600" />
+                                                        Ferdig refundert etter denne — kjøpet venter ikke på flere innbetalinger
+                                                    </label>
+                                                )}
+                                                <button onClick={handleLinkIncoming} disabled={!selectedIncomingId} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
+                                                    <Check className="w-4 h-4" />Knytt som refusjon
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        )}
                         {currentTransaction.type === 'income' && (
                             <div className="space-y-2">
                                 <button onClick={() => setRefundMode(v => !v)} className={clsx(
@@ -487,19 +654,30 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                             {refundCandidates.map(t => {
                                                 const tAccount = accounts.find(a => a.id === t.accountId);
                                                 return (
-                                                    <button key={t.id} onClick={() => setSelectedRefundId(t.id === selectedRefundId ? '' : t.id)} className={clsx(
+                                                    <button key={t.id} onClick={() => { setSelectedRefundId(t.id === selectedRefundId ? '' : t.id); setCompleteRefund(null); }} className={clsx(
                                                         "w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors",
                                                         selectedRefundId === t.id ? "bg-teal-100 dark:bg-teal-900/40" : "hover:bg-gray-50 dark:hover:bg-gray-700/50"
                                                     )}>
                                                         <span className="min-w-0">
                                                             <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
                                                             <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{tAccount ? ` • ${tAccount.name}` : ''}</span>
+                                                            {t.awaitingRefund && (() => { const info = refundStatus(t, allTransactions); return (
+                                                                <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider">
+                                                                    Venter refusjon · {info.refunded.toLocaleString('no-NO')} av {info.expected.toLocaleString('no-NO')} kr
+                                                                </span>
+                                                            ); })()}
                                                         </span>
                                                         <span className="font-semibold text-red-600 dark:text-red-400 whitespace-nowrap">-{t.amount.toLocaleString('no-NO')} kr</span>
                                                     </button>
                                                 );
                                             })}
                                         </div>
+                                        {selectedOriginal?.awaitingRefund && (
+                                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                                <input type="checkbox" checked={completeValue} onChange={(e) => setCompleteRefund(e.target.checked)} className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500 dark:bg-gray-700 dark:border-gray-600" />
+                                                Ferdig refundert etter denne — kjøpet venter ikke på flere innbetalinger
+                                            </label>
+                                        )}
                                         <button onClick={handleLinkRefund} disabled={!selectedRefundId} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 text-sm">
                                             <Check className="w-4 h-4" />Registrer som retur
                                         </button>
