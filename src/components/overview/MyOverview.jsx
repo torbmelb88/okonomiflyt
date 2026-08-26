@@ -5,9 +5,10 @@ import { api } from '../../services/firebase';
 import { ArrowRight, Wallet, CreditCard, PiggyBank, Calculator, Info, Landmark } from 'lucide-react';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
+import LiquidityCard from './LiquidityCard';
 
 export default function MyOverview() {
-    const { activeBudget, budgets, transactions, accounts } = useBudget();
+    const { activeBudget, budgets, transactions, accounts, isMonthReconciled } = useBudget();
     const { currentUser } = useAuth();
 
     // Month Selection (Default to current)
@@ -218,6 +219,34 @@ export default function MyOverview() {
     const totalObligations = totalToJointAccount + billAccountUsage + savingsAmount;
     const leftToSpend = netSalary - totalObligations;
 
+    // 6. Likviditet — what actually left the checking account(s) THIS month,
+    // on top of the transfers above. Money movement (the transfers to joint/
+    // bill/savings accounts, card bills) is skipped because it is already in
+    // the obligations; rows covered from another account are skipped because
+    // that account, not the checking account, footed the bill. Salary is
+    // netSalary already, so only other income is added back.
+    const checkingAccounts = useMemo(
+        () => accounts.filter(a => a.type === 'Bankkonto' && !a.isBillAccount && (a.defaultBudgetId || a.budgetId) === activeBudget?.id),
+        [accounts, activeBudget]
+    );
+    const checkingFlow = useMemo(() => {
+        if (!activeBudget || activeBudget.type !== 'personal') return { spending: 0, otherIncome: 0 };
+        if (!Array.isArray(transactions) || checkingAccounts.length === 0) return { spending: 0, otherIncome: 0 };
+        const ids = new Set(checkingAccounts.map(a => a.id));
+        const cat = (t) => (t.category || '').trim().toLowerCase();
+        const isMoneyMovement = (t) => ['kredittkortregning', 'sparing', 'overføring', 'intern overføring'].includes(cat(t));
+        let spending = 0, otherIncome = 0;
+        for (const t of transactions) {
+            if (t.month !== selectedMonth || !ids.has(t.accountId)) continue;
+            if (isMoneyMovement(t) || t.coveredByAccountId) continue;
+            const amount = parseFloat(t.amount) || 0;
+            if (t.type === 'expense') spending += amount;
+            else if (t.type === 'income' && t.isRefund) spending -= amount;
+            else if (t.type === 'income' && cat(t) !== 'lønn') otherIncome += amount;
+        }
+        return { spending: Math.round(spending), otherIncome: Math.round(otherIncome) };
+    }, [transactions, selectedMonth, checkingAccounts, activeBudget]);
+
     // --- RENDER ---
     if (!activeBudget) return null;
 
@@ -419,6 +448,16 @@ export default function MyOverview() {
                             </div>
                         </div>
                     </div>
+
+                    <LiquidityCard
+                        leftToSpend={leftToSpend}
+                        checkingSpending={checkingFlow.spending}
+                        checkingOtherIncome={checkingFlow.otherIncome}
+                        checkingAccounts={checkingAccounts}
+                        selectedMonth={selectedMonth}
+                        formatMonth={formatMonth}
+                        monthReconciled={isMonthReconciled(selectedMonth)}
+                    />
 
                     <UnnecessaryPurchasesCard
                         transactions={transactions}
