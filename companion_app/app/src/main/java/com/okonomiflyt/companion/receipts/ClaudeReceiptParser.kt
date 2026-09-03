@@ -32,10 +32,24 @@ class ClaudeReceiptParser {
         private const val MAX_AGE_DAYS = 120L
         // Line items must sum to the receipt total within this (øre rounding)
         private const val SUM_TOLERANCE = 0.05
-        // The API rejects images with any side over 8000 px (400 invalid_request_error)
-        private const val MAX_IMAGE_DIMENSION = 8000
-        // Recompress very large images to keep the request well under the API's size cap
-        private const val MAX_IMAGE_BYTES = 10_000_000
+        // The API allows at most 10 MB per image *after* base64 (+33 %), so re-encode above this
+        private const val MAX_IMAGE_BYTES = 7_000_000
+
+        // Standard-tier vision limits (Haiku 4.5 / Sonnet 4.6): before the model sees
+        // an image the API downscales it to at most 1568 px on the long edge AND at
+        // most 1568 visual tokens of 28x28 px. A tall receipt screenshot (1080x8000)
+        // therefore ends up ~210 px wide and the digits on quantity/weight lines
+        // become unreadable. Tall images are cut into strips that each fit the
+        // limits at full width; the model is told they are parts of one receipt.
+        private const val VISION_PATCH_PX = 28
+        private const val VISION_MAX_PATCHES = 1568
+        private const val VISION_MAX_EDGE_PX = 1568
+        // Widest strip that still leaves 40 rows of patches (39 x 40 = 1560 tokens).
+        // Wider images are shrunk to this; a phone screenshot (1080 px) is untouched.
+        private const val TILE_MAX_WIDTH = 39 * VISION_PATCH_PX
+        // Neighbouring strips share this many rows (about two text lines) so a line
+        // cut by a strip boundary is whole in one of them
+        private const val TILE_OVERLAP_PX = 96
 
         // Fixed category set so spending statistics stay consistent across receipts
         val CATEGORIES = listOf(
@@ -65,6 +79,8 @@ Regler:
 - Beløp i parentes andre steder på kvitteringen er også kun informasjon og skal aldri bidra til summen.
 - normalizedName: små bokstaver, rekkefølgen merkevare + produkt + størrelse + ev. pakningsstørrelse, ingen bindestrek eller skråstrek (bruk mellomrom), desimaltall med punktum. Bruk FULLE, gjenkjennelige ord — utvid forkortelser fra kvitteringen: "CC" -> "coca cola", "UTS"/"U/S"/"SF" -> "uten sukker"/"sukkerfri", "BR.BÆR" -> "bringebær", "LE." -> "lettmelk" osv. Kjente merkeforkortelser hos Coop: "GRAND." -> grandiosa (pizza), "FJL" -> fjordland, "MA."/"MAAR." -> maarud, "GREV." -> grevens, "LIBE." -> libero, "NICOR." -> nicorette, "DR.GR." -> dr greve, "DR.O" -> dr oetker, "SØRL." -> sørlandschips, "TRO"/"TORO" -> toro. Ikke gjett nye merkenavn som ikke finnes — er du usikker, behold ordet slik det står. F.eks. "TINE LETTMELK 1,75% 1L" -> "tine lettmelk 1.75% 1l", "Q-MELK LETT 1.75L" -> "q melk lettmelk 1.75l". Samme vare SKAL få nøyaktig samme normalizedName på tvers av kvitteringer FRA SAMME KJEDE — sjekk kjente-varenavn-listen for kvitteringens kjede nederst og gjenbruk eksakt navn derfra hvis varen finnes der. Bruk ALDRI navn fra en annen kjedes liste — kjedene navngir samme vare forskjellig, og statistikken føres per kjede.
 - Vekt-varer: unit="kg", quantity=vekten, unitPrice=kilopris. Volum: unit="l". Ellers unit="stk".
+- LINJESUM: hver varelinje har en trykt linjesum ytterst til høyre. totalPrice er ALLTID den trykte linjesummen, kopiert siffer for siffer — regn den aldri ut selv fra antall × pris. Les desimalene nøyaktig (44,80 er ikke 44,90). Sjekk deretter at quantity × unitPrice ≈ totalPrice; stemmer det ikke, har du lest ett av tallene feil — les linjen på nytt.
+- KIWI-APPEN (digital kvittering — ser annerledes ut enn papirkvitteringen fra kassa): øverst står et sammendrag med "Kjøpesum" (= total; tusenskille med mellomrom, "1 146,23 kr" = 1146.23), deretter bonuslinjer som "Grunnbonus + 1%", "Trumf Pay +1%", "Trumf Kredittkort +1%", "KIWI PLUSS Frukt & Grønt + 14%" og "Total Trumf-bonus". Dette er Trumf-BONUS kunden får i etterkant — IKKE rabatt og IKKE varelinjer; de skal aldri trekkes fra, legges til eller tas med som linjer. Under "Varer" står hver vare som: navn, beløp til høyre, en underlinje med antall ("2 stk") eller vekt ("430 gram"), og et prosentmerke ("3 %", "17 %") som er bonusprosent — ignorer prosentmerket helt (discount=0). Beløpet til høyre er LINJESUMMEN for hele antallet: "Lettmelk 1% 1,75l q  94,20 kr / 3 stk" -> quantity=3, unitPrice=31.40, totalPrice=94.20. Vekt: "Løk gul pr kg first price  14,15 kr / 430 gram" -> unit="kg", quantity=0.43, unitPrice=32.91 (linjesum delt på kg, to desimaler), totalPrice=14.15. Pant står som egne varelinjer. Kjøpstidspunktet står under butikknavnet, ofte relativt ("I dag kl. 13:30", "I går ...").
 - KONTROLL: summen av alle totalPrice (inkl. pant og ev. negative rabattlinjer) skal være eksakt lik totalbeløpet. Stemmer det ikke, har du sannsynligvis dobbelttellet en rabatt av variant 1 — rett det opp før du svarer.
 - date er kjøpsdato i formatet YYYY-MM-DD, lest fra kvitteringen. Står datoen relativt («i dag», «i går»), regn den ut fra dagens dato som oppgis under. Finner du ingen dato, bruk dagens dato — GJETT ALDRI en dato. total er beløpet som faktisk ble betalt."""
     }
@@ -115,16 +131,17 @@ Regler:
                             "Ukjent filtype (ikke PDF eller bilde). Mottatt mime: $mimeHint"
                         )
                     )
-                val (sendBytes, mimeType) = normalizeImage(fileBytes, detectedMime)
-
-                val base64Data = Base64.encodeToString(sendBytes, Base64.NO_WRAP)
-                val fileBlock = JSONObject().apply {
-                    put("type", if (mimeType == "application/pdf") "document" else "image")
-                    put("source", JSONObject().apply {
-                        put("type", "base64")
-                        put("media_type", mimeType)
-                        put("data", base64Data)
-                    })
+                val receiptBlocks = receiptBlocks(fileBytes, detectedMime)
+                val stripCount = receiptBlocks.count { it.optString("type") == "image" }
+                val parseInstruction = buildString {
+                    append("Analyser denne kvitteringen og trekk ut alle varelinjer.")
+                    if (stripCount > 1) {
+                        append(
+                            " Kvitteringen er ett langt bilde delt i $stripCount utsnitt ovenfra og ned. " +
+                                "Naboutsnitt overlapper litt: en varelinje som er synlig nederst i ett utsnitt " +
+                                "og øverst i det neste er SAMME linje og skal bare telles én gang."
+                        )
+                    }
                 }
 
                 val today = isoDate(java.util.Date())
@@ -145,17 +162,14 @@ Regler:
                     }
                 }
 
-                val messages = JSONArray().put(userMessage(
-                    fileBlock,
-                    "Analyser denne kvitteringen og trekk ut alle varelinjer."
-                ))
+                val messages = JSONArray().put(userMessage(receiptBlocks, parseInstruction))
                 if (feedback != null && previousRaw != null) {
                     messages.put(JSONObject().apply {
                         put("role", "assistant")
                         put("content", previousRaw)
                     })
                     messages.put(userMessage(
-                        null,
+                        emptyList(),
                         "Brukeren har sett gjennom analysen din og kommenterer: «$feedback». " +
                             "Rett opp i henhold til kommentaren og lever HELE varelisten på nytt."
                     ))
@@ -172,7 +186,7 @@ Regler:
                     put("role", "assistant")
                     put("content", firstRaw)
                 })
-                messages.put(userMessage(null, correctionText(best)))
+                messages.put(userMessage(emptyList(), correctionText(best)))
                 runCatching { requestParse(MODEL, systemPrompt, messages) }
                     .onSuccess { (second, secondRaw) ->
                         if (sumDeviation(second) < sumDeviation(best)) {
@@ -183,10 +197,7 @@ Regler:
 
                 // Attempt 3: stronger model, fresh conversation
                 Log.w(TAG, "Still off (${sumDeviation(best)}), escalating to $FALLBACK_MODEL")
-                val freshMessages = JSONArray().put(userMessage(
-                    fileBlock,
-                    "Analyser denne kvitteringen og trekk ut alle varelinjer."
-                ))
+                val freshMessages = JSONArray().put(userMessage(receiptBlocks, parseInstruction))
                 runCatching { requestParse(FALLBACK_MODEL, systemPrompt, freshMessages) }
                     .onSuccess { (third, thirdRaw) ->
                         if (sumDeviation(third) < sumDeviation(best)) {
@@ -201,9 +212,10 @@ Regler:
             }
         }
 
-    private fun userMessage(fileBlock: JSONObject?, text: String): JSONObject {
+    /** Receipt blocks (document, or labelled image strips) first, then the instruction. */
+    private fun userMessage(receiptBlocks: List<JSONObject>, text: String): JSONObject {
         val content = JSONArray()
-        if (fileBlock != null) content.put(fileBlock)
+        receiptBlocks.forEach { content.put(it) }
         content.put(JSONObject().put("type", "text").put("text", text))
         return JSONObject().put("role", "user").put("content", content)
     }
@@ -235,10 +247,39 @@ Regler:
     private fun sumDeviation(receipt: ParsedReceipt): Double =
         kotlin.math.abs(receipt.items.sumOf { it.totalPrice } - receipt.total)
 
+    /**
+     * Lines whose own numbers don't agree (quantity x unitPrice != totalPrice).
+     * A misread digit on a "2 x 22,40" or "0,192 kg x 34,90" line shows up here,
+     * so these are the first places to point the model at.
+     */
+    private fun inconsistentLines(receipt: ParsedReceipt): List<ParsedReceiptItem> =
+        receipt.items.filter {
+            !it.isDiscount && kotlin.math.abs(it.quantity * it.unitPrice - it.totalPrice) > SUM_TOLERANCE
+        }
+
     private fun correctionText(receipt: ParsedReceipt): String {
         val itemSum = receipt.items.sumOf { it.totalPrice }
-        return "Varelinjene dine summerer til %.2f, men kvitteringens totalbeløp er %.2f (avvik %.2f). Finn feilen — typisk en dobbelttellet rabatt, et parentesbeløp som ikke skulle telle med, eller en mix-blokk som er håndtert feil — og lever HELE varelisten på nytt, korrigert, slik at summen stemmer eksakt."
-            .format(itemSum, receipt.total, itemSum - receipt.total)
+        val us = java.util.Locale.US
+        return buildString {
+            append(
+                "Varelinjene dine summerer til %.2f, men kvitteringens totalbeløp er %.2f (avvik %.2f). "
+                    .format(us, itemSum, receipt.total, itemSum - receipt.total)
+            )
+            val suspicious = inconsistentLines(receipt)
+            if (suspicious.isNotEmpty()) {
+                append("Disse linjene er internt inkonsistente (antall × pris ≠ linjesum) og er de mest sannsynlige feilkildene — les dem på nytt fra kvitteringen: ")
+                suspicious.joinTo(this) {
+                    "«${it.name}» %s × %.2f ≠ %.2f".format(us, it.quantity.toString(), it.unitPrice, it.totalPrice)
+                }
+                append(". ")
+            }
+            append(
+                "Vanlige feil: et feillest siffer i en linjesum, en antall-/vektlinje tolket som egen vare, " +
+                    "en dobbelttellet rabatt av variant 1, et parentesbeløp som ikke skulle telle med, " +
+                    "en mix-blokk håndtert feil, en varelinje som mangler, eller en linje talt to ganger " +
+                    "i overlappen mellom to utsnitt. Lever HELE varelisten på nytt, korrigert, slik at summen stemmer eksakt."
+            )
+        }
     }
 
     /** One API round trip; returns the parsed receipt plus the raw JSON text. */
@@ -301,47 +342,93 @@ Regler:
     }
 
     /**
-     * The API rejects images with any side over 8000 px, which camera photos
-     * and long receipt scans can exceed. Downscales and recompresses such
-     * images; PDFs and already-acceptable images pass through untouched.
+     * Content blocks for the receipt itself: a PDF goes in as one document
+     * block; an image becomes one or more labelled image strips (see
+     * [imageStrips]).
      */
-    private fun normalizeImage(bytes: ByteArray, mimeType: String): Pair<ByteArray, String> {
-        if (mimeType == "application/pdf") return bytes to mimeType
+    private fun receiptBlocks(bytes: ByteArray, mimeType: String): List<JSONObject> {
+        if (mimeType == "application/pdf") return listOf(base64Block("document", bytes, mimeType))
+        val strips = imageStrips(bytes, mimeType)
+        if (strips.size == 1) return listOf(base64Block("image", strips[0].first, strips[0].second))
+        return strips.flatMapIndexed { i, (data, mime) ->
+            listOf(
+                JSONObject().put("type", "text").put("text", "Utsnitt ${i + 1} av ${strips.size} (ovenfra og ned):"),
+                base64Block("image", data, mime)
+            )
+        }
+    }
 
+    private fun base64Block(type: String, bytes: ByteArray, mimeType: String): JSONObject =
+        JSONObject().apply {
+            put("type", type)
+            put("source", JSONObject().apply {
+                put("type", "base64")
+                put("media_type", mimeType)
+                put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            })
+        }
+
+    /**
+     * Cuts an image into horizontal strips that each stay within the model's
+     * native resolution (see the VISION_* constants), so the API never has to
+     * shrink a tall receipt to an unreadable width. Images that already fit are
+     * returned untouched (no re-encoding); wider images are first scaled down
+     * to [TILE_MAX_WIDTH]. Strips are equal-height and overlap by
+     * [TILE_OVERLAP_PX]. Returns (bytes, mimeType) per strip, top to bottom.
+     */
+    private fun imageStrips(bytes: ByteArray, mimeType: String): List<Pair<ByteArray, String>> {
+        val asIs = listOf(bytes to mimeType)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+        val srcW = bounds.outWidth
+        val srcH = bounds.outHeight
         // Undecodable image: send as-is and let the API report what's wrong
-        if (maxDim <= 0) return bytes to mimeType
-        if (maxDim <= MAX_IMAGE_DIMENSION && bytes.size <= MAX_IMAGE_BYTES) return bytes to mimeType
+        if (srcW <= 0 || srcH <= 0) return asIs
 
+        val targetW = minOf(srcW, TILE_MAX_WIDTH)
+        val targetH = (srcH.toLong() * targetW / srcW).toInt().coerceAtLeast(1)
+        val widthPatches = (targetW + VISION_PATCH_PX - 1) / VISION_PATCH_PX
+        val maxStripH = minOf((VISION_MAX_PATCHES / widthPatches) * VISION_PATCH_PX, VISION_MAX_EDGE_PX)
+        if (targetW == srcW && srcH <= maxStripH && bytes.size <= MAX_IMAGE_BYTES) return asIs
+
+        // Decode at reduced size when possible (inSampleSize halves), keeping width >= target
         val options = BitmapFactory.Options().apply {
             inSampleSize = 1
-            while (maxDim / inSampleSize > MAX_IMAGE_DIMENSION) inSampleSize *= 2
+            while (srcW / (inSampleSize * 2) >= targetW) inSampleSize *= 2
         }
-        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            ?: return bytes to mimeType
-        // inSampleSize only halves in powers of two — scale the rest exactly
-        val scale = MAX_IMAGE_DIMENSION.toFloat() / maxOf(bitmap.width, bitmap.height)
-        if (scale < 1f) {
-            val scaled = Bitmap.createScaledBitmap(
-                bitmap,
-                (bitmap.width * scale).toInt().coerceAtLeast(1),
-                (bitmap.height * scale).toInt().coerceAtLeast(1),
-                true
-            )
+        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return asIs
+        if (bitmap.width != targetW || bitmap.height != targetH) {
+            val scaled = Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
             if (scaled !== bitmap) bitmap.recycle()
             bitmap = scaled
         }
-        val out = java.io.ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+
+        val step = maxStripH - TILE_OVERLAP_PX
+        val count = if (targetH <= maxStripH) 1
+            else (targetH - TILE_OVERLAP_PX + step - 1) / step
+        // Equal-height strips with exactly TILE_OVERLAP_PX shared rows
+        val stripH = if (count == 1) targetH
+            else (targetH + (count - 1) * TILE_OVERLAP_PX + count - 1) / count
+        // Screenshots stay lossless PNG; photos are re-encoded as high-quality JPEG
+        val (format, outMime) = if (mimeType == "image/png") Bitmap.CompressFormat.PNG to "image/png"
+            else Bitmap.CompressFormat.JPEG to "image/jpeg"
+
+        val strips = (0 until count).map { i ->
+            val top = i * (stripH - TILE_OVERLAP_PX)
+            val h = minOf(stripH, targetH - top)
+            val strip = Bitmap.createBitmap(bitmap, 0, top, targetW, h)
+            val out = java.io.ByteArrayOutputStream()
+            strip.compress(format, 92, out)
+            if (strip !== bitmap) strip.recycle()
+            out.toByteArray() to outMime
+        }
         bitmap.recycle()
         Log.i(
             TAG,
-            "Downscaled image ${bounds.outWidth}x${bounds.outHeight} (${bytes.size} B) " +
-                "-> ${out.size()} B jpeg"
+            "Image ${srcW}x${srcH} (${bytes.size} B) -> $count strip(s) of ${targetW}x$stripH, " +
+                "${strips.sumOf { it.first.size }} B $outMime"
         )
-        return out.toByteArray() to "image/jpeg"
+        return strips
     }
 
     /** Sniffs the real file type from magic bytes; falls back to a usable mime hint. */
