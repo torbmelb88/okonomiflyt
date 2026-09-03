@@ -30,6 +30,9 @@ data class ParsedReceipt(
     val date: String,            // YYYY-MM-DD
     val total: Double,
     val items: List<ParsedReceiptItem>,
+    // True when the parser could not trust the date it got (missing on the
+    // receipt or implausible) and substituted today — the user must confirm
+    val dateUncertain: Boolean = false,
     // Which attempt in the self-correction loop produced this parse —
     // telemetry for tuning the primary/fallback model choice
     val parseAttempts: Int = 1,

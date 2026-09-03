@@ -28,6 +28,8 @@ class ClaudeReceiptParser {
         private const val MODEL = "claude-haiku-4-5"
         // Escalation target when the sum check keeps failing on the primary model
         private const val FALLBACK_MODEL = "claude-sonnet-4-6"
+        // Receipts older than this are almost certainly a hallucinated date
+        private const val MAX_AGE_DAYS = 120L
         // Line items must sum to the receipt total within this (øre rounding)
         private const val SUM_TOLERANCE = 0.05
         // The API rejects images with any side over 8000 px (400 invalid_request_error)
@@ -64,7 +66,7 @@ Regler:
 - normalizedName: små bokstaver, rekkefølgen merkevare + produkt + størrelse + ev. pakningsstørrelse, ingen bindestrek eller skråstrek (bruk mellomrom), desimaltall med punktum. Bruk FULLE, gjenkjennelige ord — utvid forkortelser fra kvitteringen: "CC" -> "coca cola", "UTS"/"U/S"/"SF" -> "uten sukker"/"sukkerfri", "BR.BÆR" -> "bringebær", "LE." -> "lettmelk" osv. Kjente merkeforkortelser hos Coop: "GRAND." -> grandiosa (pizza), "FJL" -> fjordland, "MA."/"MAAR." -> maarud, "GREV." -> grevens, "LIBE." -> libero, "NICOR." -> nicorette, "DR.GR." -> dr greve, "DR.O" -> dr oetker, "SØRL." -> sørlandschips, "TRO"/"TORO" -> toro. Ikke gjett nye merkenavn som ikke finnes — er du usikker, behold ordet slik det står. F.eks. "TINE LETTMELK 1,75% 1L" -> "tine lettmelk 1.75% 1l", "Q-MELK LETT 1.75L" -> "q melk lettmelk 1.75l". Samme vare SKAL få nøyaktig samme normalizedName på tvers av kvitteringer FRA SAMME KJEDE — sjekk kjente-varenavn-listen for kvitteringens kjede nederst og gjenbruk eksakt navn derfra hvis varen finnes der. Bruk ALDRI navn fra en annen kjedes liste — kjedene navngir samme vare forskjellig, og statistikken føres per kjede.
 - Vekt-varer: unit="kg", quantity=vekten, unitPrice=kilopris. Volum: unit="l". Ellers unit="stk".
 - KONTROLL: summen av alle totalPrice (inkl. pant og ev. negative rabattlinjer) skal være eksakt lik totalbeløpet. Stemmer det ikke, har du sannsynligvis dobbelttellet en rabatt av variant 1 — rett det opp før du svarer.
-- date er kjøpsdato i formatet YYYY-MM-DD. total er beløpet som faktisk ble betalt."""
+- date er kjøpsdato i formatet YYYY-MM-DD, lest fra kvitteringen. Står datoen relativt («i dag», «i går»), regn den ut fra dagens dato som oppgis under. Finner du ingen dato, bruk dagens dato — GJETT ALDRI en dato. total er beløpet som faktisk ble betalt."""
     }
 
     private val client = OkHttpClient.Builder()
@@ -125,8 +127,10 @@ Regler:
                     })
                 }
 
+                val today = isoDate(java.util.Date())
                 val systemPrompt = buildString {
                     append(SYSTEM_PROMPT)
+                    append("\n\nDagens dato er ").append(today).append('.')
                     if (lessons.isNotEmpty()) {
                         append("\n\nVARIGE RETTELSER FRA BRUKEREN (følg disse, de overstyrer andre regler ved konflikt):\n")
                         lessons.take(100).forEach { append("- ").append(it).append('\n') }
@@ -160,7 +164,7 @@ Regler:
                 // Attempt 1: primary model
                 val (first, firstRaw) = requestParse(MODEL, systemPrompt, messages)
                 var best = first.copy(parseAttempts = 1, parseModel = MODEL, rawJson = firstRaw)
-                if (sumDeviation(best) <= SUM_TOLERANCE) return@withContext Result.success(best)
+                if (sumDeviation(best) <= SUM_TOLERANCE) return@withContext Result.success(withSaneDate(best))
 
                 // Attempt 2: same model, told exactly how far off it was
                 Log.w(TAG, "Sum check failed (${sumDeviation(best)}), asking model to self-correct")
@@ -175,7 +179,7 @@ Regler:
                             best = second.copy(parseAttempts = 2, parseModel = MODEL, rawJson = secondRaw)
                         }
                     }
-                if (sumDeviation(best) <= SUM_TOLERANCE) return@withContext Result.success(best)
+                if (sumDeviation(best) <= SUM_TOLERANCE) return@withContext Result.success(withSaneDate(best))
 
                 // Attempt 3: stronger model, fresh conversation
                 Log.w(TAG, "Still off (${sumDeviation(best)}), escalating to $FALLBACK_MODEL")
@@ -190,7 +194,7 @@ Regler:
                         }
                     }
 
-                Result.success(best)
+                Result.success(withSaneDate(best))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to parse receipt", e)
                 Result.failure(e)
@@ -202,6 +206,30 @@ Regler:
         if (fileBlock != null) content.put(fileBlock)
         content.put(JSONObject().put("type", "text").put("text", text))
         return JSONObject().put("role", "user").put("content", content)
+    }
+
+    private fun isoDate(d: java.util.Date): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(d)
+
+    /**
+     * The model has been seen inventing dates (2024-01-01, 2025-01-01 …) when
+     * a receipt shows none or only a relative one. A receipt saved with such a
+     * date lands in an old month, invisible in the web app and in the history
+     * list, and the booked transaction never matches the bank/Trumf import.
+     * Dates that are malformed, older than [MAX_AGE_DAYS] or in the future are
+     * replaced by today and flagged so the review screen asks the user.
+     */
+    private fun withSaneDate(receipt: ParsedReceipt): ParsedReceipt {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { isLenient = false }
+        val parsed = if (receipt.date.matches(Regex("\\d{4}-\\d{2}-\\d{2}")))
+            runCatching { fmt.parse(receipt.date) }.getOrNull() else null
+        val now = java.util.Date()
+        val dayMs = 24 * 60 * 60 * 1000L
+        val ageDays = if (parsed != null) (now.time - parsed.time) / dayMs else Long.MAX_VALUE
+        val plausible = parsed != null && ageDays in -1..MAX_AGE_DAYS
+        if (plausible) return receipt
+        Log.w(TAG, "Implausible receipt date '${receipt.date}' — replaced by today")
+        return receipt.copy(date = isoDate(now), dateUncertain = true)
     }
 
     private fun sumDeviation(receipt: ParsedReceipt): Double =

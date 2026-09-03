@@ -247,6 +247,16 @@ private fun ReceiptQueueScreen(
                         onSelectTransaction = { id ->
                             state = s.copy(selectedTransactionId = id)
                         },
+                        onDateChange = { date ->
+                            scope.launch {
+                                // Candidates and the duplicate check depend on the
+                                // date; keep the user's booking choices
+                                val rebuilt = buildReviewState(
+                                    s.receipt.copy(date = date, dateUncertain = false)
+                                )
+                                state = rebuilt.copy(booking = s.booking)
+                            }
+                        },
                         onToggleBooking = { enabled ->
                             state = s.copy(booking = s.booking.copy(enabled = enabled))
                         },
@@ -393,6 +403,7 @@ private fun DoneView(savedCount: Int, onDone: () -> Unit) {
 private fun ReviewView(
     state: ReceiptState.Review,
     onSelectTransaction: (String?) -> Unit,
+    onDateChange: (String) -> Unit,
     onToggleBooking: (Boolean) -> Unit,
     onSelectBookingBudget: (Budget) -> Unit,
     onSelectBookingAccount: (Account) -> Unit,
@@ -444,6 +455,13 @@ private fun ReviewView(
                     }
                 }
             }
+
+            if (receipt.dateUncertain) {
+                item {
+                    WarningCard("Fant ingen kjøpsdato på kvitteringen — satt til i dag. Rett datoen under hvis kjøpet var en annen dag.")
+                }
+            }
+            item { DateField(receipt.date, onDateChange) }
 
             if (state.isDuplicate) {
                 item {
@@ -607,6 +625,25 @@ private fun FeedbackCard(onReanalyze: (String, Boolean) -> Unit) {
             }
         }
     }
+}
+
+private val ISO_DATE = Regex("\\d{4}-\\d{2}-\\d{2}")
+
+/** Purchase date, editable — a wrong date hides the receipt in an old month. */
+@Composable
+private fun DateField(date: String, onDateChange: (String) -> Unit) {
+    var text by remember(date) { mutableStateOf(date) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { v ->
+            text = v
+            if (v.matches(ISO_DATE) && v != date) onDateChange(v)
+        },
+        label = { Text("Kjøpsdato (ÅÅÅÅ-MM-DD)") },
+        isError = !text.matches(ISO_DATE),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 @Composable
