@@ -646,7 +646,14 @@ export const ha = onRequest({
             return;
         }
 
-        const txs = await queryEq('transactions', { month, budgetId: shared.id });
+        // Last month is what gets settled now: its per-party amounts are the
+        // ones worth showing, and `reconciled` says whether they are final.
+        const prevMonth = (() => { const [y, m] = month.split('-').map(Number); const d = new Date(Date.UTC(y, m - 2, 1)); return d.toISOString().slice(0, 7); })();
+        const [txs, prevTxs, prevStatuses] = await Promise.all([
+            queryEq('transactions', { month, budgetId: shared.id }),
+            queryEq('transactions', { month: prevMonth, budgetId: shared.id }),
+            queryEq('monthStatuses', { month: prevMonth }),
+        ]);
         const lineActual = (name) => {
             const line = expenses.find(e =>
                 e.budgetId === shared.id && (e.name || '').trim().toLowerCase() === name
@@ -665,6 +672,10 @@ export const ha = onRequest({
                 dagligvarer: lineActual('dagligvarer'),
             },
             oppgjor: computeOppgjor({ shared, accounts, projects, txs, month }),
+            oppgjorForrigeMaaned: {
+                ...computeOppgjor({ shared, accounts, projects, txs: prevTxs, month: prevMonth }),
+                reconciled: prevStatuses.some(ms => ms.reconciled),
+            },
         });
     } catch (err) {
         console.error('HA feed failed:', err);
