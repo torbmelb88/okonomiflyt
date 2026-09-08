@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useBudget } from '../../contexts/BudgetContext';
-import { ArrowRight, Scale, Loader2, PiggyBank, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, Scale, Loader2, PiggyBank, CheckCircle2, AlertTriangle, ArrowLeftRight } from 'lucide-react';
 import { api } from '../../services/firebase';
 import BufferCard from './BufferCard';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import { reconcileState } from '../../utils/reconciliation';
 import { isExcludedFromSplit } from '../../utils/settlement';
+import { coverIssues, coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
 
 /**
  * Oppgjør = settlement. Household-level, identical regardless of which budget is
@@ -52,7 +53,11 @@ export default function Oppgjor() {
 
     const split = useMemo(() => {
         if (!allTx || !sharedBudget) return null;
-        const monthTx = allTx.filter(t => t.budgetId === sharedBudget.id && t.month === selectedMonth && !isExcludedFromSplit(t, accounts));
+        // Pass-through money (barnetrygd in, straight on to savings/joint
+        // account) is nobody's consumption — both legs stay out.
+        const covering = coveringIncomeIds(allTx);
+        const monthTx = allTx.filter(t => t.budgetId === sharedBudget.id && t.month === selectedMonth &&
+            !isExcludedFromSplit(t, accounts) && !isCoverNeutral(t, covering));
         // Income-type transactions (credit notes/refunds) reduce the settlement
         const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
         const totalSharedActual = sum(monthTx.filter(t => !t.payer || t.payer === 'shared'));
@@ -93,15 +98,20 @@ export default function Oppgjor() {
             unreconciled: states.filter(s => s === 'unreconciled').length,
         };
     }, [allTx, selectedMonth]);
+    // Transfers flagged «dekkes av innbetaling» whose payment is missing or
+    // doesn't add up — the red flag that the money never actually came in.
+    const coverProblems = useMemo(() => coverIssues(allTx || [], selectedMonth), [allTx, selectedMonth]);
+    const coverProblemCount = coverProblems.reduce((s, g) => s + g.expenses.length, 0);
     const pendingLabel = () => {
         const n = (x) => x === 1 ? '1 transaksjon' : `${x} transaksjoner`;
         const parts = [];
         if (pending.booked > 0) parts.push(`${n(pending.booked)} er kun bokført (venter på bankmatch)`);
         if (pending.unreconciled > 0) parts.push(`${n(pending.unreconciled)} er ikke kategorisert`);
-        return parts.join(' og ');
+        if (coverProblemCount > 0) parts.push(`${coverProblemCount === 1 ? '1 overføring' : `${coverProblemCount} overføringer`} mangler dekning`);
+        return parts.join(', ').replace(/, ([^,]*)$/, ' og $1');
     };
     const toggleReconciled = async () => {
-        if (!monthReconciled && pending.booked + pending.unreconciled > 0) {
+        if (!monthReconciled && pending.booked + pending.unreconciled + coverProblemCount > 0) {
             if (!window.confirm(`${pendingLabel()} i ${formatMonth(selectedMonth)}. Vil du likevel markere måneden som avstemt?`)) return;
         }
         setSavingReconciled(true);
@@ -207,6 +217,45 @@ export default function Oppgjor() {
                         </div>
                     )}
 
+                    {/* Rødt flagg: penger som skulle komme inn og gå videre, men ikke henger sammen */}
+                    {coverProblems.length > 0 && (
+                        <div className="bg-red-50 dark:bg-red-900/20 p-6 rounded-xl border border-red-200 dark:border-red-800">
+                            <div className="flex items-center gap-3 mb-1">
+                                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0" />
+                                <h3 className="text-lg font-bold text-red-800 dark:text-red-200">Dekning mangler</h3>
+                            </div>
+                            <p className="text-sm text-red-700 dark:text-red-300 mb-4">
+                                Disse overføringene er merket «dekkes av innbetaling», men innbetalingen er ikke koblet eller summene stemmer ikke. Sjekk at pengene faktisk kom inn, og koble dem i avstemmingen.
+                            </p>
+                            <div className="space-y-3">
+                                {coverProblems.map((g, i) => (
+                                    <div key={i} className="bg-white dark:bg-gray-800 border border-red-100 dark:border-red-900/50 rounded-lg p-3">
+                                        <div className="text-xs font-semibold uppercase tracking-wider text-red-700 dark:text-red-300 mb-2 flex items-center gap-1.5">
+                                            <ArrowLeftRight className="w-3.5 h-3.5" />
+                                            {g.status === 'missing'
+                                                ? 'Ingen innbetaling koblet'
+                                                : `Avvik: inn ${g.in.toLocaleString('no-NO')} kr, ut ${g.out.toLocaleString('no-NO')} kr`}
+                                        </div>
+                                        <div className="space-y-1">
+                                            {g.expenses.map(t => (
+                                                <div key={t.id} className="flex justify-between text-sm text-gray-800 dark:text-gray-200">
+                                                    <span className="truncate mr-2">{t.date} · {t.name}</span>
+                                                    <span className="flex-shrink-0 text-red-600 dark:text-red-400">−{t.amount.toLocaleString('no-NO')} kr</span>
+                                                </div>
+                                            ))}
+                                            {g.incomes.map(t => (
+                                                <div key={t.id} className="flex justify-between text-sm text-gray-800 dark:text-gray-200">
+                                                    <span className="truncate mr-2">{t.date} · {t.name}</span>
+                                                    <span className="flex-shrink-0 text-green-600 dark:text-green-400">+{t.amount.toLocaleString('no-NO')} kr</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Månedsstatus: markerer måneden som ferdig avstemt (monthStatuses) */}
                     <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between gap-4">
                         {monthReconciled ? (
@@ -229,8 +278,8 @@ export default function Oppgjor() {
                                     <div className="text-sm text-gray-600 dark:text-gray-400">
                                         Marker <span className="capitalize font-medium">{formatMonth(selectedMonth)}</span> som ferdig avstemt når oppgjøret er gjennomført.
                                     </div>
-                                    {pending.booked + pending.unreconciled > 0 && (
-                                        <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                                    {pending.booked + pending.unreconciled + coverProblemCount > 0 && (
+                                        <div className={`text-xs mt-1 ${coverProblemCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'}`}>
                                             {pendingLabel()}.
                                         </div>
                                     )}

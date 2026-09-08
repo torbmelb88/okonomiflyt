@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { api } from '../services/firebase';
 import { useAuth } from './AuthContext';
 import { isSelfReported, reconcilesOnLink } from '../utils/reconciliation';
+import { coverLinkIds, isCoveredExpense } from '../utils/coverage';
 
 const BudgetContext = createContext();
 
@@ -327,8 +328,15 @@ export function BudgetProvider({ children }) {
             // A split refund's children only exist because of the parent.
             const children = transactions.filter(t => t.refundParentId === id);
             await Promise.all(children.map(c => api.deleteDocument('transactions', c.id)));
+            // Expenses this income covered lose the link — and so show
+            // «dekning mangler» until a replacement payment is linked.
+            const covered = transactions.filter(t => coverLinkIds(t).includes(id));
+            const strip = (t) => ({ coveredByTransactionIds: coverLinkIds(t).filter(x => x !== id) });
+            await Promise.all(covered.map(t => api.updateDocument('transactions', t.id, strip(t))));
             await api.deleteDocument('transactions', id);
-            setTransactions(prev => prev.filter(t => t.id !== id && t.refundParentId !== id));
+            setTransactions(prev => prev
+                .filter(t => t.id !== id && t.refundParentId !== id)
+                .map(t => coverLinkIds(t).includes(id) ? { ...t, ...strip(t) } : t));
         } catch (error) {
             console.error("Error deleting transaction:", error);
             throw error;
@@ -373,6 +381,10 @@ export function BudgetProvider({ children }) {
             // bank copy merges into it.
             awaitingRefund: !!(keep.awaitingRefund || remove.awaitingRefund),
             expectedRefundAmount: prefer('expectedRefundAmount'),
+            // Pass-through links survive the merge from either side
+            coveredByIncoming: !!(keep.coveredByIncoming || remove.coveredByIncoming),
+            coveredByTransactionIds: [...new Set([...coverLinkIds(keep), ...coverLinkIds(remove)])],
+            reconciledByCover: !!(keep.reconciledByCover || remove.reconciledByCover),
             // The pair was matched against the bank, so the survivor carries
             // the bank-side identity (externalId/source) even when the kept
             // copy is the self-reported one — the next import then recognizes
@@ -406,12 +418,19 @@ export function BudgetProvider({ children }) {
         }
         const refundsAtRemoved = transactions.filter(t => t.refundOfTransactionId === removeId);
         await Promise.all(refundsAtRemoved.map(r => api.updateDocument('transactions', r.id, { refundOfTransactionId: keepId })));
+        // Expenses covered by the doomed income now point at the survivor
+        const repoint = (ids) => [...new Set(ids.map(id => id === removeId ? keepId : id))];
+        const coveredByRemoved = transactions.filter(t => t.id !== keepId && coverLinkIds(t).includes(removeId));
+        await Promise.all(coveredByRemoved.map(t => api.updateDocument('transactions', t.id, { coveredByTransactionIds: repoint(coverLinkIds(t)) })));
         await api.deleteDocument('transactions', removeId);
         setTransactions(prev => prev
             .filter(t => t.id !== removeId)
-            .map(t => t.id === keepId
-                ? { ...t, ...patch }
-                : (t.refundOfTransactionId === removeId ? { ...t, refundOfTransactionId: keepId } : t)));
+            .map(t => {
+                if (t.id === keepId) return { ...t, ...patch };
+                if (t.refundOfTransactionId === removeId) t = { ...t, refundOfTransactionId: keepId };
+                if (coverLinkIds(t).includes(removeId)) t = { ...t, coveredByTransactionIds: repoint(coverLinkIds(t)) };
+                return t;
+            }));
     };
 
     // Registers `incomeId` as a refund of `originalId` (see utils/refunds.js).
@@ -516,6 +535,66 @@ export function BudgetProvider({ children }) {
         setTransactions(prev => prev
             .filter(t => t.refundParentId !== parent.id)
             .map(t => t.id === parent.id ? { ...t, ...patch } : t));
+    };
+
+    // --- Pass-through money («dekkes av innbetaling», see utils/coverage.js) ---
+
+    // Applies one patch per id and mirrors it into local state.
+    const applyPatches = async (patches) => {
+        const entries = Object.entries(patches).filter(([, p]) => p && Object.keys(p).length > 0);
+        await Promise.all(entries.map(([id, p]) => api.updateDocument('transactions', id, p)));
+        setTransactions(prev => prev.map(t => patches[t.id] ? { ...t, ...patches[t.id] } : t));
+    };
+
+    // An income that stops covering anything goes back to «uavstemt» — but
+    // only if it was this link that reconciled it in the first place.
+    const releaseIncomePatch = (income, expensesAfter) => {
+        if (!income?.reconciledByCover) return null;
+        const stillCovering = expensesAfter.some(e => isCoveredExpense(e) && coverLinkIds(e).includes(income.id));
+        return stillCovering ? null : { reconciled: false, reconciledByCover: null };
+    };
+
+    // Flags an outgoing transfer as funded by incoming money. Turning it off
+    // drops every link, so the flag and the links never disagree.
+    const setCoveredByIncoming = async (expenseId, flag) => {
+        const expense = transactions.find(t => t.id === expenseId);
+        if (!expense) throw new Error('Fant ikke transaksjonen');
+        const patches = { [expenseId]: { coveredByIncoming: !!flag, coveredByTransactionIds: flag ? coverLinkIds(expense) : [] } };
+        if (!flag) {
+            const after = transactions.map(t => t.id === expenseId ? { ...t, ...patches[expenseId] } : t);
+            for (const id of coverLinkIds(expense)) {
+                const release = releaseIncomePatch(transactions.find(t => t.id === id), after);
+                if (release) patches[id] = release;
+            }
+        }
+        await applyPatches(patches);
+    };
+
+    // Links an income as (part of) the cover for an expense. The income
+    // counts as handled by the link — a bank row needs nothing more.
+    const linkCover = async (expenseId, incomeId) => {
+        const expense = transactions.find(t => t.id === expenseId);
+        const income = transactions.find(t => t.id === incomeId);
+        if (!expense || !income) throw new Error('Fant ikke begge transaksjonene');
+        if (income.type !== 'income' || expense.type === 'income') throw new Error('Dekning går fra en innbetaling til en utbetaling');
+        const ids = coverLinkIds(expense);
+        const patches = {
+            [expenseId]: { coveredByIncoming: true, coveredByTransactionIds: ids.includes(incomeId) ? ids : [...ids, incomeId] },
+        };
+        if (!income.reconciled && reconcilesOnLink(income)) patches[incomeId] = { reconciled: true, reconciledByCover: true };
+        await applyPatches(patches);
+    };
+
+    // Removes one link; the expense stays flagged (and so shows «dekning
+    // mangler» until another income is linked or the flag is cleared).
+    const unlinkCover = async (expenseId, incomeId) => {
+        const expense = transactions.find(t => t.id === expenseId);
+        if (!expense) throw new Error('Fant ikke transaksjonen');
+        const patches = { [expenseId]: { coveredByTransactionIds: coverLinkIds(expense).filter(id => id !== incomeId) } };
+        const after = transactions.map(t => t.id === expenseId ? { ...t, ...patches[expenseId] } : t);
+        const release = releaseIncomePatch(transactions.find(t => t.id === incomeId), after);
+        if (release) patches[incomeId] = release;
+        await applyPatches(patches);
     };
 
     // --- Receipts (grocery line items from the companion app) ---
@@ -1010,6 +1089,9 @@ export function BudgetProvider({ children }) {
         linkRefund,
         linkRefundSplit,
         unlinkRefund,
+        setCoveredByIncoming,
+        linkCover,
+        unlinkCover,
         reloadTransactions,
         bankBalances,
         linkTransactionToBudgetItem,

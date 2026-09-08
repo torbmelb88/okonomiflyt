@@ -31,6 +31,10 @@ Prosjektet består av tre deler:
 - **Matvareinnsikt** – varelinjer kategoriseres og aggregeres per kjede
 - **Prosjekter** – øremerkede utgifter (oppussing, ferie) på tvers av budsjetter
 - **Refusjoner og utlegg** – retur/utlegg håndteres eksplisitt i oppgjøret
+- **Penger på gjennomreise** – en overføring som dekkes av en innbetaling
+  (f.eks. barnetrygd videre til sparekonto) kobles til innbetalingen og
+  holdes utenfor oppgjøret; mangler koblingen, eller stemmer ikke summene,
+  får du et rødt flagg
 - **Claude-connector (MCP)** – spør Claude om økonomien fra mobilen og
   registrer utlegg i chat, via en remote MCP-server ([mcp-server/](mcp-server/))
 

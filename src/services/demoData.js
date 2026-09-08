@@ -246,6 +246,20 @@ export function createDemoDb() {
         category: 'Annet', isRefund: true, refundOfTransactionId: elkjopPurchase.id
     }));
 
+    // Barnetrygd passing through the joint bill account: in, then straight on
+    // to the child's savings and the joint account («dekkes av innbetaling»,
+    // utils/coverage.js). Last month is complete; this month the transfer is
+    // flagged but the payment hasn't been linked yet — the red-flag case.
+    const barnetrygd = tx(-1, 1, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'NAV BARNETRYGD', amount: 1766, type: 'income', category: 'Barnetrygd', reconciledByCover: true });
+    transactions.push(
+        barnetrygd,
+        tx(-1, 2, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'Overføring sparekonto barn', amount: 1000, type: 'expense', category: 'Sparing', coveredByIncoming: true, coveredByTransactionIds: [barnetrygd.id] }),
+        tx(-1, 2, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'Overføring til brukskonto', amount: 766, type: 'expense', category: 'Intern Overføring', coveredByIncoming: true, coveredByTransactionIds: [barnetrygd.id] }),
+        tx(0, 1, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'NAV BARNETRYGD', amount: 1766, type: 'income', reconciled: false }),
+        tx(0, 2, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'Overføring sparekonto barn', amount: 1000, type: 'expense', category: 'Sparing', coveredByIncoming: true, coveredByTransactionIds: [] }),
+        tx(0, 2, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'Overføring til brukskonto', amount: 766, type: 'expense', reconciled: false }),
+    );
+
     // Link the receipts to their card transactions
     const coopTx = transactions.find(t => t.receiptId === 'receipt-1');
     const kiwiTx = transactions.find(t => t.receiptId === 'receipt-2');

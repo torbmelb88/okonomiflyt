@@ -3,6 +3,7 @@ import {
     Upload, ArrowDownLeft, ArrowUpRight, Edit2, Trash2, CheckCircle,
     Link2, FolderKanban, ReceiptText, ArrowRight, CreditCard,
     MessageSquare, Smartphone, Landmark, ArrowUpDown, X, Undo2, Merge, FileText,
+    ArrowLeftRight, AlertTriangle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
@@ -11,6 +12,7 @@ import { exclusionReason } from '../../utils/settlement';
 import MergeTransactionsModal from './MergeTransactionsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
+import { coverGroups, COVER_STATUS_LABEL } from '../../utils/coverage';
 
 /**
  * Reusable transaction engine: month navigation, summary, account filter,
@@ -23,6 +25,8 @@ export default function TransactionsPanel({
     selectedMonth,
     setSelectedMonth,
     reconcileNonce,
+    focusIds,
+    focusNonce,
 }) {
     const {
         expenses, transactions, projects, receipts,
@@ -61,6 +65,14 @@ export default function TransactionsPanel({
     const accountNameById = new Map(accounts.map(a => [a.id, a.name]));
     const panelTransactions = transactions;
 
+    // Pass-through money («dekkes av innbetaling», utils/coverage.js): every
+    // covered expense and covering income mapped to its group, whose status
+    // drives the green/red badge.
+    const coverGroupById = new Map();
+    for (const g of coverGroups(transactions)) {
+        for (const t of [...g.expenses, ...g.incomes]) coverGroupById.set(t.id, g);
+    }
+
     // Extra filters (AND-combined chips). "Manuell/CSV" = no source field:
     // the companion app stamps source:'companion_app', the SB1 import
     // stamps source:'sb1' and the credit-card invoice import
@@ -75,6 +87,7 @@ export default function TransactionsPanel({
         { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t) },
         { key: 'booked', label: 'Venter avstemming', Icon: null, test: (t) => reconcileState(t) === 'booked' },
         { key: 'awaitingRefund', label: 'Venter refusjon', Icon: null, test: (t) => !!t.awaitingRefund },
+        { key: 'cover', label: 'Dekning', Icon: ArrowLeftRight, test: (t) => coverGroupById.has(t.id) },
         { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy },
         { key: 'receipt', label: 'Kvittering', Icon: ReceiptText, test: (t) => !!t.receiptId || receipts.some(r => r.transactionId === t.id) },
     ];
@@ -111,6 +124,8 @@ export default function TransactionsPanel({
     const isExcludedFromSummary = (t) => {
         // A split refund's parent is represented by its children
         if (t.refundSplit) return true;
+        // Pass-through money is neither income nor spending
+        if (coverGroupById.has(t.id)) return true;
         const normalize = (str) => (str ? str.trim().toLowerCase() : '');
         const category = normalize(t.category);
         if (['kredittkortregning', 'sparing', 'overføring', 'intern overføring'].includes(category)) return true;
@@ -191,6 +206,14 @@ export default function TransactionsPanel({
         if (reconcileNonce) handleManualReconcile();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reconcileNonce]);
+
+    // …or open it on a specific set of rows (the «dekning mangler» banner).
+    useEffect(() => {
+        if (!focusNonce) return;
+        const rows = (focusIds || []).map(id => transactions.find(t => t.id === id)).filter(Boolean);
+        if (rows.length > 0) { setTransactionsToReconcile(rows); setIsReconcileModalOpen(true); }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusNonce]);
 
     const handleEditTransaction = (e, transaction) => {
         e.stopPropagation();
@@ -389,6 +412,23 @@ export default function TransactionsPanel({
                                                         <Undo2 className="w-3 h-3 flex-shrink-0" />Venter refusjon{refundedAmount > 0 ? ` · ${refundedAmount.toLocaleString('no-NO')} av ${refundExpected.toLocaleString('no-NO')}` : ''}
                                                     </span>
                                                 )}
+                                                {coverGroupById.has(trans.id) && (() => {
+                                                    const g = coverGroupById.get(trans.id);
+                                                    const ok = g.status === 'ok';
+                                                    const sums = `Inn ${g.in.toLocaleString('no-NO')} kr, ut ${g.out.toLocaleString('no-NO')} kr.`;
+                                                    const title = g.status === 'missing'
+                                                        ? 'Merket «dekkes av innbetaling», men ingen innbetaling er koblet. Åpne raden og koble innbetalingen — eller fjern merkingen.'
+                                                        : g.status === 'mismatch'
+                                                            ? `Innbetalingen(e) og utbetalingen(e) stemmer ikke overens. ${sums}`
+                                                            : `Penger på gjennomreise — holdes utenfor oppgjør og overføringsberegninger. ${sums}`;
+                                                    return (
+                                                        <span className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider',
+                                                            ok ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300')} title={title}>
+                                                            {ok ? <ArrowLeftRight className="w-3 h-3 flex-shrink-0" /> : <AlertTriangle className="w-3 h-3 flex-shrink-0" />}
+                                                            {ok && trans.type === 'income' ? 'Dekker utbetaling' : COVER_STATUS_LABEL[g.status]}
+                                                        </span>
+                                                    );
+                                                })()}
                                                 {!trans.awaitingRefund && refundedAmount > 0 && (
                                                     <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundedAmount > trans.amount ? 'Mer refundert enn kjøpet kostet — overskytende gjør netto negativt' : 'Hele eller deler av beløpet er refundert'}>
                                                         <Undo2 className="w-3 h-3 flex-shrink-0" />{refundedAmount.toLocaleString('no-NO')} kr refundert{refundedAmount > trans.amount ? ' (overrefundert)' : ''}

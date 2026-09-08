@@ -4,6 +4,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 import { AlertTriangle, CheckCircle2, Download } from 'lucide-react';
 import TransactionsPanel from './TransactionsPanel';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
+import { coverIssues } from '../../utils/coverage';
 
 /**
  * Transaksjoner = the raw transaction list and reconciliation. Owns the
@@ -21,6 +22,7 @@ export default function Transactions() {
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
     const [reconcileNonce, setReconcileNonce] = useState(0);
+    const [focusNonce, setFocusNonce] = useState(0);
 
     if (loading) return <div>Laster transaksjoner...</div>;
     if (!activeBudget) return <div>Ingen budsjett valgt.</div>;
@@ -36,6 +38,11 @@ export default function Transactions() {
     const monthTransactions = transactions.filter(t => t.month === selectedMonth);
     const unreconciledCount = monthTransactions.filter(t => !isHandled(t)).length;
     const bookedCount = monthTransactions.filter(t => reconcileState(t) === 'booked').length;
+    // Red flag: transfers marked «dekkes av innbetaling» whose payment is
+    // missing or doesn't add up (utils/coverage.js). Independent of the
+    // reconcile state — such a row may well be «avstemt» as Sparing.
+    const coverProblems = coverIssues(transactions, selectedMonth);
+    const coverProblemRows = coverProblems.flatMap(g => g.expenses);
 
     return (
         <div className="space-y-6">
@@ -82,12 +89,36 @@ export default function Transactions() {
                 </div>
             )}
 
+            {coverProblemRows.length > 0 && (
+                <div className="flex items-center justify-between gap-4 p-4 rounded-xl border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
+                    <div className="flex items-center gap-3">
+                        <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0" />
+                        <div>
+                            <div className="font-semibold text-red-800 dark:text-red-200">
+                                {coverProblemRows.length} {coverProblemRows.length === 1 ? 'overføring mangler' : 'overføringer mangler'} dekning
+                            </div>
+                            <div className="text-sm text-red-700 dark:text-red-300">
+                                Merket «dekkes av innbetaling», men innbetalingen er ikke koblet eller summene stemmer ikke. Sjekk at pengene faktisk kom inn.
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => setFocusNonce(n => n + 1)}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg shadow-sm whitespace-nowrap"
+                    >
+                        Koble innbetaling
+                    </button>
+                </div>
+            )}
+
             {/* Transactions (all accounts, bank + credit card) */}
             <TransactionsPanel
                 accounts={accounts}
                 selectedMonth={selectedMonth}
                 setSelectedMonth={setSelectedMonth}
                 reconcileNonce={reconcileNonce}
+                focusIds={coverProblemRows.map(t => t.id)}
+                focusNonce={focusNonce}
             />
         </div>
     );

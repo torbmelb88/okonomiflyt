@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { X, Check, Plus, CreditCard, Edit2, FolderKanban, Sparkles, Wallet, Undo2 } from 'lucide-react';
+import { X, Check, Plus, CreditCard, Edit2, FolderKanban, Sparkles, Wallet, Undo2, ArrowLeftRight, AlertTriangle } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import AddBudgetItemModal from '../budget/AddBudgetItemModal';
 import TransactionReceipt from './TransactionReceipt';
@@ -9,13 +9,24 @@ import { FOREIGN_CURRENCIES } from '../../utils/currency';
 import { reconcilesOnLink } from '../../utils/reconciliation';
 import { refundStatus, refundsOf, allocationsValid, allocationComplete, parseAmount } from '../../utils/refunds';
 import RefundAllocationEditor from './RefundAllocationEditor';
+import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
 import clsx from 'clsx';
+
+const fmtKr = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('no-NO');
+const daysBetween = (a, b) => Math.abs((new Date(a) - new Date(b)) / 86400000);
+// One line summing up a cover group: what came in against what went out.
+const coverStatusText = (g) => {
+    if (g.status === 'missing') return 'Ingen innbetaling koblet';
+    if (g.status === 'mismatch') return `Avvik — inn ${fmtKr(g.in)} kr, ut ${fmtKr(g.out)} kr (${g.diff > 0 ? '+' : ''}${fmtKr(g.diff)} kr)`;
+    return `Inn ${fmtKr(g.in)} kr = ut ${fmtKr(g.out)} kr`;
+};
 
 export default function ReconcileTransactionsModal({ isOpen, onClose, transactions, onComplete }) {
     const {
         expenses, budgetItemDefs, categories, ensureInstanceForDef,
         addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, transactions: allTransactions,
         linkRefund, linkRefundSplit, unlinkRefund,
+        setCoveredByIncoming, linkCover, unlinkCover,
     } = useBudget();
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedBudgetItemId, setSelectedBudgetItemId] = useState(''); // holds a def id
@@ -43,6 +54,11 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const [incomingMode, setIncomingMode] = useState(false);
     const [incomingSearch, setIncomingSearch] = useState('');
     const [selectedIncomingId, setSelectedIncomingId] = useState('');
+    // «Dekkes av innbetaling» (utils/coverage.js): the flag and links are
+    // saved as soon as they change, so the check holds whichever way the
+    // row is then reconciled — and a flag left without a link IS the red flag.
+    const [coverMode, setCoverMode] = useState(false);
+    const [coverSearch, setCoverSearch] = useState('');
     // '' = NOK. Saved immediately on change (like the date), so the flag can be
     // set retroactively on foreign purchases logged before currency detection.
     const [currency, setCurrency] = useState('');
@@ -92,6 +108,8 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setIncomingMode(false);
         setIncomingSearch('');
         setSelectedIncomingId('');
+        setCoverMode(false);
+        setCoverSearch('');
         setCurrency(currentTransaction?.currency && currentTransaction.currency !== 'NOK' ? currentTransaction.currency : '');
         // Default the budget to the account's default (overridable). For an
         // already-reconciled transaction, keep its stored budget so a prior
@@ -170,6 +188,65 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setAllocations([...allocations, { transactionId: t.id, amount: String(Math.round(amount * 100) / 100), complete: null }]);
     };
     const allocationsOk = !!allocIncome && allocationsValid(allocations, allocIncome.amount);
+
+    // Pass-through cover: the expense's linked incomes, or (income side) the
+    // expenses this payment funds. The group check spans both directions.
+    const covered = isCoveredExpense(liveTx);
+    const covering = liveTx.type === 'income' && isCoveringIncome(liveTx, allTransactions);
+    const coverGroup = (covered || covering) ? coverGroupOf(liveTx, allTransactions) : null;
+    const coverIncomes = covered ? coveringIncomesOf(liveTx, allTransactions) : [];
+    const coverExpenses = covering ? expensesCoveredBy(liveTx, allTransactions) : [];
+    const coverRemaining = coverGroup ? Math.max(0, coverGroup.out - coverGroup.in) : liveTx.amount;
+    const txCat = (t) => (t.category || '').trim().toLowerCase();
+    // Same account and nearest in date first — the payment normally lands
+    // days before the transfer on the same account. Any month is searchable.
+    const rankNear = (t, targetAmount) => (a, b) =>
+        (a.accountId === t.accountId ? 0 : 1) - (b.accountId === t.accountId ? 0 : 1) ||
+        daysBetween(a.date, t.date) - daysBetween(b.date, t.date) ||
+        Math.abs(a.amount - targetAmount) - Math.abs(b.amount - targetAmount);
+    const matchesSearch = (t) => !coverSearch || t.name.toLowerCase().includes(coverSearch.toLowerCase());
+    const coverIncomeCandidates = covered && coverMode
+        ? allTransactions
+            .filter(t => t.type === 'income' && !t.isRefund && !t.refundSplit && txCat(t) !== 'lønn' && !coverLinkIds(liveTx).includes(t.id))
+            .filter(matchesSearch)
+            .sort(rankNear(liveTx, coverRemaining || liveTx.amount))
+            .slice(0, 30)
+        : [];
+    const coverExpenseCandidates = liveTx.type === 'income' && coverMode
+        ? allTransactions
+            .filter(t => t.type === 'expense' && !t.refundSplit && !coverLinkIds(t).includes(liveTx.id))
+            .filter(matchesSearch)
+            .sort(rankNear(liveTx, liveTx.amount))
+            .slice(0, 30)
+        : [];
+
+    const handleToggleCovered = async (flag) => {
+        try {
+            await setCoveredByIncoming(currentTransaction.id, flag);
+            setCoverMode(flag && coverLinkIds(liveTx).length === 0);
+            setCoverSearch('');
+        } catch (error) {
+            console.error("Failed to flag cover", error);
+            alert("Kunne ikke oppdatere.");
+        }
+    };
+    const handleLinkCover = async (expenseId, incomeId) => {
+        try {
+            await linkCover(expenseId, incomeId);
+            setCoverMode(false);
+            setCoverSearch('');
+        } catch (error) {
+            console.error("Failed to link cover", error);
+            alert(error?.message || "Kunne ikke koble innbetalingen.");
+        }
+    };
+    const handleUnlinkCover = async (expenseId, incomeId) => {
+        try { await unlinkCover(expenseId, incomeId); }
+        catch (error) {
+            console.error("Failed to unlink cover", error);
+            alert("Kunne ikke fjerne koblingen.");
+        }
+    };
 
     // Budget items are the library defs eligible for the SELECTED budget's scope.
     const selectedBudget = budgets.find(b => b.id === selectedBudgetId);
@@ -459,6 +536,14 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                     <span className="text-xs text-gray-500 dark:text-gray-400">kr — tomt = hele kjøpet</span>
                                 </div>
                             )}
+                            {currentTransaction.type === 'expense' && (
+                                <div className="flex items-center">
+                                    <input type="checkbox" id="coveredByIncoming" checked={covered} onChange={(e) => handleToggleCovered(e.target.checked)} className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600" />
+                                    <label htmlFor="coveredByIncoming" className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">Dekkes av innbetaling 🔃
+                                        <InfoTip text="Penger på gjennomreise: overføringen er finansiert av en innbetaling på samme konto (f.eks. barnetrygd som går videre til sparing og felleskonto). Både utbetalingen og innbetalingen holdes utenfor oppgjøret og overføringsberegningene — men bare når innbetalingen faktisk er koblet. Mangler kobling, eller stemmer ikke summene, får du et rødt flagg. Lagres med en gang." />
+                                    </label>
+                                </div>
+                            )}
                             <div className="pt-1">
                                 <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Kommentar (valgfritt)" rows={2} className="w-full text-sm px-3 py-2 border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-400 outline-none resize-none" />
                             </div>
@@ -636,6 +721,112 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                             </div>
                                         )}
                                     </>
+                                )}
+                            </div>
+                        )}
+                        {(covered || covering) && coverGroup && (
+                            <div className={clsx(
+                                "border rounded-xl p-3 space-y-2",
+                                coverGroup.status === 'ok'
+                                    ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10"
+                                    : "border-red-300 dark:border-red-800 bg-red-50/60 dark:bg-red-900/10"
+                            )}>
+                                <p className={clsx("text-sm font-medium flex items-center gap-1.5 flex-wrap", coverGroup.status === 'ok' ? "text-emerald-800 dark:text-emerald-200" : "text-red-700 dark:text-red-300")}>
+                                    {coverGroup.status === 'ok' ? <ArrowLeftRight className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                                    {covered ? 'Dekkes av innbetaling' : 'Dekker utbetaling'}
+                                    <span className="font-normal text-xs">· {coverStatusText(coverGroup)}</span>
+                                </p>
+                                {(covered ? coverIncomes : coverExpenses).map(r => (
+                                    <div key={r.id} className="flex items-center justify-between gap-2 text-sm bg-white dark:bg-gray-800 rounded-lg px-3 py-1.5 border border-gray-100 dark:border-gray-700">
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-gray-900 dark:text-gray-100">{r.name}</span>
+                                            <span className="block text-xs text-gray-500 dark:text-gray-400">{r.date}{accounts.find(a => a.id === r.accountId) ? ` • ${accounts.find(a => a.id === r.accountId).name}` : ''}</span>
+                                        </span>
+                                        <span className="flex items-center gap-2 whitespace-nowrap">
+                                            <span className={clsx("font-semibold", r.type === 'income' ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>{r.type === 'income' ? '+' : '-'}{fmtKr(r.amount)} kr</span>
+                                            <button onClick={() => handleUnlinkCover(covered ? liveTx.id : r.id, covered ? r.id : liveTx.id)} title="Fjern koblingen" className="p-1 text-gray-400 hover:text-red-600 rounded"><X className="w-3.5 h-3.5" /></button>
+                                        </span>
+                                    </div>
+                                ))}
+                                {covered && coverGroup.expenses.filter(e => e.id !== liveTx.id).map(e => (
+                                    <p key={e.id} className="text-xs text-gray-600 dark:text-gray-400 px-1">Samme dekning: {e.name} ({e.date}) −{fmtKr(e.amount)} kr</p>
+                                ))}
+                                {covered && (
+                                    <button onClick={() => setCoverMode(v => !v)} className={clsx(
+                                        "w-full py-2 rounded-lg text-sm font-medium transition-colors",
+                                        coverMode ? "bg-emerald-600 text-white" : "bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200"
+                                    )}>
+                                        {coverIncomes.length > 0 ? 'Koble enda en innbetaling' : 'Finn innbetalingen'}
+                                    </button>
+                                )}
+                                {covered && coverMode && (
+                                    <div className="space-y-2">
+                                        <input
+                                            type="text"
+                                            value={coverSearch}
+                                            onChange={(e) => setCoverSearch(e.target.value)}
+                                            placeholder="Søk i innbetalinger (alle måneder)..."
+                                            className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white outline-none focus:ring-2 focus:ring-emerald-400"
+                                        />
+                                        <div className="max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                                            {coverIncomeCandidates.length === 0 && (
+                                                <p className="p-3 text-sm text-gray-500 dark:text-gray-400">Ingen innbetalinger funnet. Er den importert fra banken ennå?</p>
+                                            )}
+                                            {coverIncomeCandidates.map(t => {
+                                                const tAccount = accounts.find(a => a.id === t.accountId);
+                                                return (
+                                                    <button key={t.id} onClick={() => handleLinkCover(liveTx.id, t.id)} className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20">
+                                                        <span className="min-w-0">
+                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                                            <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{tAccount ? ` • ${tAccount.name}` : ''}{isCoveringIncome(t, allTransactions) ? ' • dekker allerede en annen utbetaling' : t.budgetItemId || t.category ? ` • ${t.category || 'kategorisert'}` : ' • uavstemt'}</span>
+                                                        </span>
+                                                        <span className="font-semibold text-green-600 dark:text-green-400 whitespace-nowrap">+{fmtKr(t.amount)} kr</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {currentTransaction.type === 'income' && !liveTx.isRefund && (
+                            <div className="space-y-2">
+                                <button onClick={() => { setCoverMode(v => !v); setCoverSearch(''); }} className={clsx(
+                                    "w-full flex items-center justify-center gap-2 py-3 rounded-xl transition-colors font-medium text-sm",
+                                    coverMode
+                                        ? "bg-emerald-600 text-white"
+                                        : "bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300"
+                                )}>
+                                    <ArrowLeftRight className="w-4 h-4" />{covering ? 'Dekker også en annen utbetaling' : 'Dekker en utgående overføring'}
+                                    <InfoTip text="Penger på gjennomreise (f.eks. barnetrygd som går videre til sparing og felleskonto). Velg utbetalingen(e) innbetalingen finansierer — begge sider holdes da utenfor oppgjøret, og innbetalingen regnes som avstemt." />
+                                </button>
+                                {coverMode && (
+                                    <div className="border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 space-y-2 bg-emerald-50/50 dark:bg-emerald-900/10">
+                                        <input
+                                            type="text"
+                                            value={coverSearch}
+                                            onChange={(e) => setCoverSearch(e.target.value)}
+                                            placeholder="Søk i utbetalinger (alle måneder)..."
+                                            className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white outline-none focus:ring-2 focus:ring-emerald-400"
+                                        />
+                                        <div className="max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                                            {coverExpenseCandidates.length === 0 && (
+                                                <p className="p-3 text-sm text-gray-500 dark:text-gray-400">Ingen utbetalinger funnet.</p>
+                                            )}
+                                            {coverExpenseCandidates.map(t => {
+                                                const tAccount = accounts.find(a => a.id === t.accountId);
+                                                return (
+                                                    <button key={t.id} onClick={() => handleLinkCover(t.id, liveTx.id)} className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20">
+                                                        <span className="min-w-0">
+                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                                            <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{tAccount ? ` • ${tAccount.name}` : ''}{isCoveredExpense(t) ? (coverLinkIds(t).length ? ' • dekkes allerede delvis' : ' • venter på dekning') : ''}</span>
+                                                        </span>
+                                                        <span className="font-semibold text-red-600 dark:text-red-400 whitespace-nowrap">-{fmtKr(t.amount)} kr</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
                                 )}
                             </div>
                         )}

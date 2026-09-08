@@ -7,6 +7,7 @@ import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
 import LiquidityCard from './LiquidityCard';
 import { refundStatus } from '../../utils/refunds';
+import { coveringIncomeIds, isCoverNeutral, isCoveredExpense } from '../../utils/coverage';
 
 export default function MyOverview() {
     const { activeBudget, budgets, transactions, accounts, isMonthReconciled } = useBudget();
@@ -146,6 +147,10 @@ export default function MyOverview() {
         calculateSharedShare();
     }, [activeBudget, budgets, prevMonthStr, currentUser, accounts]);
 
+    // Pass-through money (utils/coverage.js): a transfer funded by an incoming
+    // payment, and that payment, are nobody's consumption — out of every sum.
+    const coveringIds = useMemo(() => coveringIncomeIds(transactions), [transactions]);
+
     const creditCardUsage = useMemo(() => {
         if (!activeBudget || activeBudget.type !== 'personal') return 0;
         if (!Array.isArray(transactions)) return 0;
@@ -158,12 +163,13 @@ export default function MyOverview() {
                 if (t.refundSplit) return false; // represented by its split children
                 // Held out of the transfer calc, or covered from another account
                 if (t.excludeFromSharedCalc || t.coveredByAccountId) return false;
+                if (isCoverNeutral(t, coveringIds)) return false;
                 // Must be linked to a Credit Card account
                 const account = accounts.find(a => a.id === t.accountId);
                 return account && account.type === 'Kredittkort';
             })
             .reduce((sum, t) => sum + (t.type === 'income' ? -t.amount : t.amount), 0);
-    }, [transactions, prevMonthStr, accounts, activeBudget]);
+    }, [transactions, prevMonthStr, accounts, activeBudget, coveringIds]);
 
     // Buffer build-up on the shared bill account (plan made on Oppgjør): my
     // equal share of the monthly extra rides on top of the settlement transfer.
@@ -184,7 +190,7 @@ export default function MyOverview() {
         if (!activeBudget || activeBudget.type !== 'personal') return 0;
         if (!Array.isArray(transactions)) return 0;
         return transactions
-            .filter(t => t.month === selectedMonth && t.type === 'expense' &&
+            .filter(t => t.month === selectedMonth && t.type === 'expense' && !isCoveredExpense(t) &&
                 (t.category || '').trim().toLowerCase() === 'sparing')
             .reduce((sum, t) => sum + t.amount, 0);
     }, [transactions, selectedMonth, activeBudget]);
@@ -212,11 +218,11 @@ export default function MyOverview() {
                 // «Hold kostnad utenfor» excludes it from the top-up transfer,
                 // whether or not another covering account was specified
                 if (t.excludeFromSharedCalc || t.coveredByAccountId) return false;
-                if (isMoneyMovement(t)) return false;
+                if (isMoneyMovement(t) || isCoverNeutral(t, coveringIds)) return false;
                 return true;
             })
             .reduce((sum, t) => sum + (t.type === 'income' ? -t.amount : t.amount), 0);
-    }, [transactions, prevMonthStr, billAccounts, activeBudget]);
+    }, [transactions, prevMonthStr, billAccounts, activeBudget, coveringIds]);
 
     // 5. Total Calculations
     const totalObligations = totalToJointAccount + billAccountUsage + savingsAmount;
@@ -241,14 +247,14 @@ export default function MyOverview() {
         let spending = 0, otherIncome = 0;
         for (const t of transactions) {
             if (t.month !== selectedMonth || !ids.has(t.accountId)) continue;
-            if (isMoneyMovement(t) || t.coveredByAccountId || t.refundSplit) continue;
+            if (isMoneyMovement(t) || t.coveredByAccountId || t.refundSplit || isCoverNeutral(t, coveringIds)) continue;
             const amount = parseFloat(t.amount) || 0;
             if (t.type === 'expense') spending += amount;
             else if (t.type === 'income' && t.isRefund) spending -= amount;
             else if (t.type === 'income' && cat(t) !== 'lønn') otherIncome += amount;
         }
         return { spending: Math.round(spending), otherIncome: Math.round(otherIncome) };
-    }, [transactions, selectedMonth, checkingAccounts, activeBudget]);
+    }, [transactions, selectedMonth, checkingAccounts, activeBudget, coveringIds]);
 
     // Refunds still expected on this month's purchases (a partner's Vipps
     // etc.). Informational: the purchase is already deducted in full above,
