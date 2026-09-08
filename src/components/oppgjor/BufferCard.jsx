@@ -25,8 +25,14 @@ const formatMonth = (m) => {
  *
  * `settlementMonth` = the month currently shown on Oppgjør (consumption month
  * being settled) — a new plan starts there.
+ *
+ * With `parties={1}` the same card serves a personal bill account on Min
+ * Oversikt: the whole monthly extra rides on «Til Regningskonto» and the
+ * wording drops the settlement/party talk.
  */
 export default function BufferCard({ account, parties, settlementMonth }) {
+    const personal = parties === 1;
+    const roundLabel = personal ? 'påfyllet' : 'oppgjøret';
     const { bankBalances, updateAccount } = useBudget();
     const { theme } = useTheme();
     const [months, setMonths] = useState(3);
@@ -147,17 +153,17 @@ export default function BufferCard({ account, parties, settlementMonth }) {
                                 Oppbyggingsplan: {kr(plan.monthlyTotal)} per måned i {plan.months} måneder
                             </div>
                             <div className="text-gray-600 dark:text-gray-400 mt-0.5">
-                                {kr(Math.ceil(plan.monthlyTotal / Math.max(1, parties)))} per part · gjelder oppgjørene for {formatMonth(plan.startMonth)} – {formatMonth(planEndMonth(plan))}
+                                {personal ? '' : `${kr(Math.ceil(plan.monthlyTotal / Math.max(1, parties)))} per part · `}gjelder {personal ? 'påfyllene' : 'oppgjørene'} for {formatMonth(plan.startMonth)} – {formatMonth(planEndMonth(plan))}
                                 {' '}(startet med {kr(plan.gapAtStart)} manglende)
                             </div>
                             <div className="mt-1 text-xs">
                                 {planActive && (
                                     <span className="text-purple-700 dark:text-purple-300 font-medium">
-                                        Måned {planMonthIndex(plan, settlementMonth) + 1} av {plan.months} — {kr(perParty)} per part legges på oppgjøret for {formatMonth(settlementMonth)}.
+                                        Måned {planMonthIndex(plan, settlementMonth) + 1} av {plan.months} — {kr(perParty)}{personal ? '' : ' per part'} legges på {roundLabel} for {formatMonth(settlementMonth)}.
                                     </span>
                                 )}
                                 {planFinished && <span className="text-gray-500 dark:text-gray-400">Planen er ferdig. {ok ? 'Bufferen er nådd — du kan avslutte den.' : 'Bufferen er fortsatt ikke nådd — avslutt og lag en ny plan.'}</span>}
-                                {!planActive && !planFinished && <span className="text-gray-500 dark:text-gray-400">Planen starter med oppgjøret for {formatMonth(plan.startMonth)}.</span>}
+                                {!planActive && !planFinished && <span className="text-gray-500 dark:text-gray-400">Planen starter med {roundLabel} for {formatMonth(plan.startMonth)}.</span>}
                             </div>
                         </div>
                         <button onClick={endPlan} disabled={saving} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700 whitespace-nowrap">
@@ -167,7 +173,7 @@ export default function BufferCard({ account, parties, settlementMonth }) {
                 </div>
             ) : (gap > 0 && (
                 <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Spar opp bufferen via oppgjøret</div>
+                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Spar opp bufferen via {roundLabel}</div>
                     <div className="flex flex-wrap items-center gap-3 text-sm">
                         <span className="text-gray-600 dark:text-gray-400">Fordel {kr(gap)} over</span>
                         <input
@@ -175,13 +181,13 @@ export default function BufferCard({ account, parties, settlementMonth }) {
                             onChange={(e) => setMonths(Math.max(1, parseInt(e.target.value) || 1))}
                             className="w-20 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
                         />
-                        <span className="text-gray-600 dark:text-gray-400">måneder og {parties} parter</span>
+                        <span className="text-gray-600 dark:text-gray-400">{personal ? 'måneder' : `måneder og ${parties} parter`}</span>
                         <span className="text-gray-400">→</span>
-                        <span className="font-bold text-gray-900 dark:text-gray-100">{kr(previewPerParty)} ekstra per part per måned</span>
+                        <span className="font-bold text-gray-900 dark:text-gray-100">{kr(previewPerParty)} ekstra{personal ? '' : ' per part'} per måned</span>
                     </div>
                     <div className="flex items-center justify-between mt-3">
                         <span className="text-xs text-gray-500 dark:text-gray-400">
-                            Første måned: oppgjøret for {formatMonth(settlementMonth)}, siste: {formatMonth(addMonths(settlementMonth, months - 1))}. Beløpet legges på «Du betaler» / «Partner betaler» og på Min Oversikt.
+                            Første måned: {roundLabel} for {formatMonth(settlementMonth)}, siste: {formatMonth(addMonths(settlementMonth, months - 1))}. {personal ? 'Beløpet legges på «Til Regningskonto» her på Min Oversikt.' : 'Beløpet legges på «Du betaler» / «Partner betaler» og på Min Oversikt.'}
                         </span>
                         <button onClick={startPlan} disabled={saving} className="ml-3 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 whitespace-nowrap disabled:bg-gray-300">
                             {saving ? 'Lagrer…' : 'Start plan'}

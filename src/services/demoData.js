@@ -69,7 +69,7 @@ export function createDemoDb() {
 
     const accounts = [
         { id: 'acc-bruks', name: 'Brukskonto', type: 'Bankkonto', defaultBudgetId: 'budget-personal', sb1AccountKey: 'demo-key-bruks', ownerId: demoUser.uid },
-        { id: 'acc-regning', name: 'Regningskonto', type: 'Bankkonto', defaultBudgetId: 'budget-personal', isBillAccount: true, sb1AccountKey: 'demo-key-regning', ownerId: demoUser.uid },
+        { id: 'acc-regning', name: 'Regningskonto', type: 'Bankkonto', defaultBudgetId: 'budget-personal', isBillAccount: true, bufferTarget: 12000, sb1AccountKey: 'demo-key-regning', ownerId: demoUser.uid },
         { id: 'acc-felles', name: 'Felleskonto', type: 'Bankkonto', defaultBudgetId: 'budget-shared', sb1AccountKey: 'demo-key-felles', isBillAccount: true, bufferTarget: 8000, ownerId: demoUser.uid },
         { id: 'acc-kort', name: 'Kredittkort', type: 'Kredittkort', defaultBudgetId: 'budget-personal', cardLastFour: '1234', sb1AccountKey: 'demo-key-kort', ownerId: demoUser.uid },
         { id: 'acc-sparing', name: 'Bufferkonto', type: 'Sparing', defaultBudgetId: 'budget-personal', sb1AccountKey: 'demo-key-sparing', ownerId: demoUser.uid }
@@ -96,6 +96,15 @@ export function createDemoDb() {
             sb1BalanceHistory.push({
                 id: `hist-felles-${iso}`, sb1AccountKey: 'demo-key-felles', name: 'Felleskonto',
                 date: iso, balance: Math.round(balance * 100) / 100, availableBalance: Math.round(balance * 100) / 100, currency: 'NOK',
+            });
+            // The personal bill account: topped up on the 25th, smaller bills,
+            // sits a little under its 12k buffer target right before top-up
+            const sincePersonal = (day - 25 + 31) % 31;
+            let personal = 19500 - sincePersonal * 310 - (sincePersonal > 10 ? 900 : 0);
+            personal = Math.max(personal, 9100) + ((day * 53) % 70);
+            sb1BalanceHistory.push({
+                id: `hist-regning-${iso}`, sb1AccountKey: 'demo-key-regning', name: 'Regningskonto',
+                date: iso, balance: Math.round(personal * 100) / 100, availableBalance: Math.round(personal * 100) / 100, currency: 'NOK',
             });
         }
     }

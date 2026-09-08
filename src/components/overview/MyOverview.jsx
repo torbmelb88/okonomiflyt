@@ -6,6 +6,7 @@ import { ArrowRight, Wallet, CreditCard, PiggyBank, Calculator, Info, Landmark }
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
 import LiquidityCard from './LiquidityCard';
+import BufferCard from '../oppgjor/BufferCard';
 import { refundStatus } from '../../utils/refunds';
 import { coveringIncomeIds, isCoverNeutral, isCoveredExpense } from '../../utils/coverage';
 import { isExcludedFromSplit, heldOutOfTransfer, coveredByAccountOf } from '../../utils/settlement';
@@ -225,8 +226,17 @@ export default function MyOverview() {
             .reduce((sum, t) => sum + (t.type === 'income' ? -t.amount : t.amount), 0);
     }, [transactions, prevMonthStr, billAccounts, activeBudget, coveringIds, allProjects]);
 
+    // Buffer build-up on MY bill account(s): one party, so the whole monthly
+    // extra from the plan (made on the BufferCard below) rides on the top-up.
+    const personalBufferAccounts = useMemo(() => billAccounts.filter(a => a.bufferTarget > 0), [billAccounts]);
+    const billBufferContribution = useMemo(
+        () => totalBufferContributionPerParty(personalBufferAccounts, prevMonthStr, 1),
+        [personalBufferAccounts, prevMonthStr]
+    );
+    const billAccountTotal = billAccountUsage + billBufferContribution;
+
     // 5. Total Calculations
-    const totalObligations = totalToJointAccount + billAccountUsage + savingsAmount;
+    const totalObligations = totalToJointAccount + billAccountTotal + savingsAmount;
     const leftToSpend = netSalary - totalObligations;
 
     // 6. Likviditet — what actually left the checking account(s) THIS month,
@@ -392,12 +402,18 @@ export default function MyOverview() {
                                         <span className="text-gray-600 dark:text-gray-400">Faktisk forbruk ({formatMonth(prevMonthStr)})</span>
                                         <span className="font-medium text-gray-900 dark:text-white">{billAccountUsage.toLocaleString('no-NO')} kr</span>
                                     </div>
+                                    {billBufferContribution > 0 && (
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><PiggyBank className="w-3.5 h-3.5 text-purple-500" /> Bufferoppbygging</span>
+                                            <span className="font-medium text-gray-900 dark:text-white">{billBufferContribution.toLocaleString('no-NO')} kr</span>
+                                        </div>
+                                    )}
                                     <div className="h-px bg-gray-100 dark:bg-gray-700 my-2"></div>
                                 </div>
 
                                 <div className="flex justify-between items-end">
                                     <span className="text-sm font-medium text-amber-600 dark:text-amber-400">Totalt å overføre</span>
-                                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{billAccountUsage.toLocaleString('no-NO')} kr</span>
+                                    <span className="text-3xl font-bold text-gray-900 dark:text-white">{billAccountTotal.toLocaleString('no-NO')} kr</span>
                                 </div>
                             </div>
                         </div>
@@ -427,6 +443,11 @@ export default function MyOverview() {
                         </div>
                     </div>
 
+                    {/* Buffer on my bill account(s): same card as Oppgjør, one party */}
+                    {personalBufferAccounts.map(a => (
+                        <BufferCard key={a.id} account={a} parties={1} settlementMonth={prevMonthStr} />
+                    ))}
+
                 </div>
 
                 {/* Right Column: SUMMARY */}
@@ -453,7 +474,7 @@ export default function MyOverview() {
                             </div>
                             <div className="flex justify-between text-indigo-100 text-sm">
                                 <span>- Regningskonto</span>
-                                <span>- {billAccountUsage.toLocaleString('no-NO')} kr</span>
+                                <span>- {billAccountTotal.toLocaleString('no-NO')} kr</span>
                             </div>
                             <div className="flex justify-between text-indigo-100 text-sm">
                                 <span>- Sparing</span>
