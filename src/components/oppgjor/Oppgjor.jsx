@@ -5,7 +5,7 @@ import { api } from '../../services/firebase';
 import BufferCard from './BufferCard';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import { reconcileState } from '../../utils/reconciliation';
-import { isExcludedFromSplit } from '../../utils/settlement';
+import { isExcludedFromSplit, coveredByAccountOf } from '../../utils/settlement';
 import { coverIssues, coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
 
 /**
@@ -15,7 +15,7 @@ import { coverIssues, coveringIncomeIds, isCoverNeutral } from '../../utils/cove
  * shared budget, across all transactions.
  */
 export default function Oppgjor() {
-    const { budgets, accounts, currentUser, loading, monthStatuses, isMonthReconciled, setMonthReconciled } = useBudget();
+    const { budgets, accounts, allProjects, currentUser, loading, monthStatuses, isMonthReconciled, setMonthReconciled } = useBudget();
     const [allTx, setAllTx] = useState(null);
     const [savingReconciled, setSavingReconciled] = useState(false);
     const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -57,7 +57,7 @@ export default function Oppgjor() {
         // account) is nobody's consumption — both legs stay out.
         const covering = coveringIncomeIds(allTx);
         const monthTx = allTx.filter(t => t.budgetId === sharedBudget.id && t.month === selectedMonth &&
-            !isExcludedFromSplit(t, accounts) && !isCoverNeutral(t, covering));
+            !isExcludedFromSplit(t, accounts, allProjects) && !isCoverNeutral(t, covering));
         // Income-type transactions (credit notes/refunds) reduce the settlement
         const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
         const totalSharedActual = sum(monthTx.filter(t => !t.payer || t.payer === 'shared'));
@@ -82,7 +82,7 @@ export default function Oppgjor() {
         const partnerAmount = roundingMode > 1 ? Math.ceil(rawPartner / roundingMode) * roundingMode : Math.round(rawPartner);
 
         return { userShare, partnerShare, userAmount, partnerAmount, splitLabel, utleggSelf, utleggPartner, totalActualConsumption };
-    }, [allTx, sharedBudget, accounts, selectedMonth, currentUser, roundingMode]);
+    }, [allTx, sharedBudget, accounts, allProjects, selectedMonth, currentUser, roundingMode]);
 
     const monthReconciled = isMonthReconciled(selectedMonth);
     const reconciledAt = monthStatuses.find(ms => ms.month === selectedMonth)?.reconciledAt;
@@ -123,14 +123,16 @@ export default function Oppgjor() {
     const coveredFromList = useMemo(() => {
         if (!allTx) return [];
         const byAcc = {};
-        for (const t of allTx.filter(t => t.coveredByAccountId && t.month === selectedMonth)) {
-            const id = t.coveredByAccountId;
+        // The covering account comes from the row itself or from its project
+        for (const t of allTx.filter(t => t.month === selectedMonth)) {
+            const id = coveredByAccountOf(t, allProjects);
+            if (!id) continue;
             if (!byAcc[id]) byAcc[id] = { accountId: id, total: 0, items: [] };
             byAcc[id].total += (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0);
             byAcc[id].items.push(t);
         }
         return Object.values(byAcc);
-    }, [allTx, selectedMonth]);
+    }, [allTx, selectedMonth, allProjects]);
 
     if (loading) return <div>Laster oppgjør...</div>;
 

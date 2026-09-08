@@ -29,7 +29,8 @@ Prosjektet består av tre deler:
 - **Kvitteringer på varelinjenivå** – companion-appen tolker kvitteringer med
   Claude og matcher dem automatisk mot transaksjoner på beløp + dato
 - **Matvareinnsikt** – varelinjer kategoriseres og aggregeres per kjede
-- **Prosjekter** – øremerkede utgifter (oppussing, ferie) på tvers av budsjetter
+- **Prosjekter** – øremerkede utgifter (oppussing, ferie) på tvers av budsjetter;
+  et prosjekt kan holde alle sine transaksjoner utenfor oppgjøret
 - **Refusjoner og utlegg** – retur/utlegg håndteres eksplisitt i oppgjøret
 - **Penger på gjennomreise** – en overføring som dekkes av en innbetaling
   (f.eks. barnetrygd videre til sparekonto) kobles til innbetalingen og

@@ -1,10 +1,19 @@
 import { useState } from 'react';
-import { FolderOpen, Plus, Pencil, Trash2, ChevronDown, ChevronUp, X, Check, FolderKanban, Users, Wallet } from 'lucide-react';
+import { FolderOpen, Plus, Pencil, Trash2, ChevronDown, ChevronUp, X, Check, FolderKanban, Users, Wallet, Ban } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
 import clsx from 'clsx';
 
-const emptyForm = { name: '', description: '', targetAmount: '', budgetId: '', subcategories: [], subcatRenames: [] };
+const emptyForm = { name: '', description: '', targetAmount: '', budgetId: '', subcategories: [], subcatRenames: [], excludeFromSharedCalc: false, coveredByAccountId: '' };
+
+// «Hold utenfor fordeling» at project level (utils/settlement.js): every
+// transaction logged on the project stays out of the split, optionally
+// covered from another account. The covering account only means something
+// together with the flag.
+const settlementFields = (form) => ({
+    excludeFromSharedCalc: !!form.excludeFromSharedCalc,
+    coveredByAccountId: form.excludeFromSharedCalc ? (form.coveredByAccountId || null) : null,
+});
 
 // Income (refunds) subtracts from what a set of transactions "cost"
 const signedSum = (txns) => txns.reduce((sum, t) => sum + (t.type === 'income' ? -1 : 1) * (t.amount || 0), 0);
@@ -28,7 +37,7 @@ const groupByMonth = (txns) => {
 };
 
 export default function Projects() {
-    const { projects, addProject, updateProject, deleteProject, budgets, activeBudget } = useBudget();
+    const { projects, addProject, updateProject, deleteProject, budgets, accounts, activeBudget } = useBudget();
 
     const [expandedId, setExpandedId] = useState(null);
     const [loadedTxns, setLoadedTxns] = useState({});
@@ -89,7 +98,8 @@ export default function Projects() {
                 description: form.description.trim(),
                 targetAmount: parseFloat(form.targetAmount) || 0,
                 budgetId: form.budgetId || null,
-                subcategories: form.subcategories
+                subcategories: form.subcategories,
+                ...settlementFields(form),
             });
             setForm(emptyForm);
             setIsCreating(false);
@@ -106,7 +116,9 @@ export default function Projects() {
             targetAmount: project.targetAmount ? String(project.targetAmount) : '',
             budgetId: project.budgetId || '',
             subcategories: project.subcategories || [],
-            subcatRenames: []
+            subcatRenames: [],
+            excludeFromSharedCalc: !!project.excludeFromSharedCalc,
+            coveredByAccountId: project.coveredByAccountId || '',
         });
         setIsCreating(false);
     };
@@ -152,7 +164,8 @@ export default function Projects() {
                 description: form.description.trim(),
                 targetAmount: parseFloat(form.targetAmount) || 0,
                 budgetId: form.budgetId || null,
-                subcategories: form.subcategories
+                subcategories: form.subcategories,
+                ...settlementFields(form),
             });
             await applySubcatChanges(editingId, form.subcatRenames, originalSubcats, form.subcategories);
             setEditingId(null);
@@ -220,6 +233,7 @@ export default function Projects() {
                     saving={saving}
                     title="Nytt prosjekt"
                     budgets={budgets}
+                    accounts={accounts}
                 />
             )}
 
@@ -262,6 +276,7 @@ export default function Projects() {
                                     saving={saving}
                                     title="Rediger prosjekt"
                                     budgets={budgets}
+                                    accounts={accounts}
                                 />
                             </div>
                         ) : (
@@ -290,6 +305,12 @@ export default function Projects() {
                                                 ) : (
                                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
                                                         Alle budsjetter
+                                                    </span>
+                                                )}
+                                                {project.excludeFromSharedCalc && (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300" title="Alle transaksjoner på prosjektet holdes utenfor fordelingen på Oppgjør">
+                                                        <Ban className="w-3 h-3" />
+                                                        Utenfor fordeling{project.coveredByAccountId ? ` · dekkes fra ${accounts.find(a => a.id === project.coveredByAccountId)?.name || 'annen konto'}` : ''}
                                                     </span>
                                                 )}
                                             </div>
@@ -484,7 +505,7 @@ function FilterChip({ label, amount, active, onClick }) {
     );
 }
 
-function ProjectForm({ form, setForm, onSave, onCancel, saving, title, budgets }) {
+function ProjectForm({ form, setForm, onSave, onCancel, saving, title, budgets, accounts }) {
     const [newSubcat, setNewSubcat] = useState('');
     const [editingSubcat, setEditingSubcat] = useState(null);
     const [editValue, setEditValue] = useState('');
@@ -563,6 +584,38 @@ function ProjectForm({ form, setForm, onSave, onCancel, saving, title, budgets }
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                     Prosjektet vises kun i valgt budsjett.
                 </p>
+            </div>
+            <div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={!!form.excludeFromSharedCalc}
+                        onChange={e => setForm(f => ({ ...f, excludeFromSharedCalc: e.target.checked }))}
+                        className="w-4 h-4 mt-0.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                        <span className="font-medium">Hold alle transaksjoner utenfor fordeling 🚫</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400">
+                            Samme som «Hold kostnad utenfor fordeling» ved avstemming, men for hele prosjektet: kjøpene telles i prosjektregnskapet og mot budsjettpostene, men holdes utenfor oppgjøret mellom dere. Gjelder også transaksjoner som allerede er logget på prosjektet.
+                        </span>
+                    </span>
+                </label>
+                {form.excludeFromSharedCalc && (
+                    <div className="ml-6 mt-2">
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Skal transaksjonene dekkes fra en annen konto?</label>
+                        <select
+                            value={form.coveredByAccountId || ''}
+                            onChange={e => setForm(f => ({ ...f, coveredByAccountId: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                        >
+                            <option value="">Nei / ikke spesifisert</option>
+                            {(accounts || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            Vises under «Dekkes fra andre kontoer» på Oppgjør. En transaksjon kan fortsatt overstyre kontoen selv.
+                        </p>
+                    </div>
+                )}
             </div>
             <div>
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Underkategorier (valgfritt)</label>

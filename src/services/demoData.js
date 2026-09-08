@@ -265,7 +265,8 @@ export function createDemoDb() {
     const kiwiTx = transactions.find(t => t.receiptId === 'receipt-2');
 
     const projects = [
-        { id: 'proj-bad', name: 'Oppussing bad', description: 'Nytt bad i kjelleren', targetAmount: 80000, budgetId: 'budget-shared', subcategories: ['Materialer', 'Fagfolk'], ownerId: demoUser.uid },
+        // Held out of the settlement split as a whole and paid from the buffer account
+        { id: 'proj-bad', name: 'Oppussing bad', description: 'Nytt bad i kjelleren', targetAmount: 80000, budgetId: 'budget-shared', subcategories: ['Materialer', 'Fagfolk'], excludeFromSharedCalc: true, coveredByAccountId: 'acc-sparing', ownerId: demoUser.uid },
         { id: 'proj-ferie', name: 'Sommerferie', description: 'Ferietur med familien', targetAmount: 25000, budgetId: null, subcategories: [], ownerId: demoUser.uid }
     ];
 

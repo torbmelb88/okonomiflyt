@@ -262,7 +262,14 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     // Projects belong to a budget — follow the selected budget (plus legacy
     // budget-less projects, which show everywhere).
     const budgetProjects = allProjects.filter(p => !p.budgetId || p.budgetId === selectedBudgetId);
-    const selectedProjectSubcats = allProjects.find(p => p.id === selectedProjectId)?.subcategories || [];
+    const selectedProject = allProjects.find(p => p.id === selectedProjectId) || null;
+    const selectedProjectSubcats = selectedProject?.subcategories || [];
+    // A project can hold every transaction logged on it out of the split
+    // (utils/settlement.js) — then the per-row choice is moot and shown as
+    // locked. Nothing is stamped on the row; the project setting is derived.
+    const projectHoldsOut = !!selectedProject?.excludeFromSharedCalc;
+    const projectCoverAccount = projectHoldsOut && selectedProject.coveredByAccountId
+        ? accounts.find(a => a.id === selectedProject.coveredByAccountId) : null;
     const eligibleDefs = budgetItemDefs
         .filter(d => d.scope === 'both' || d.scope === scope)
         .sort((a, b) => catName(a.categoryId).localeCompare(catName(b.categoryId), 'no-NO') || a.name.localeCompare(b.name, 'no-NO'));
@@ -504,7 +511,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                 </label>
                             </div>
                             <div className="flex items-center">
-                                <input type="checkbox" id="excludeFromSharedCalc" checked={excludeFromSharedCalc} onChange={(e) => setExcludeFromSharedCalc(e.target.checked)} className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600" />
+                                <input type="checkbox" id="excludeFromSharedCalc" checked={excludeFromSharedCalc || projectHoldsOut} disabled={projectHoldsOut} onChange={(e) => setExcludeFromSharedCalc(e.target.checked)} className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 disabled:opacity-60" />
                                 <label htmlFor="excludeFromSharedCalc" className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
                                     {isSharedTarget ? 'Hold kostnad utenfor fordeling 🚫' : 'Hold kostnad utenfor overføringsberegning 🚫'}
                                     <InfoTip text={isSharedTarget
@@ -512,7 +519,12 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                         : 'Kjøpet telles fortsatt mot budsjettposten, men holdes utenfor overføringsberegningen i Min Oversikt (kredittkortbruk / påfyll av regningskonto).'} />
                                 </label>
                             </div>
-                            {excludeFromSharedCalc && (
+                            {projectHoldsOut && (
+                                <p className="ml-6 text-xs text-gray-600 dark:text-gray-400">
+                                    Holdes utenfor av prosjektet «{selectedProject.name}»{projectCoverAccount ? ` — dekkes fra ${projectCoverAccount.name}` : ''}. Endres under prosjektets innstillinger.
+                                </p>
+                            )}
+                            {excludeFromSharedCalc && !projectHoldsOut && (
                                 <div className="ml-6 flex flex-col gap-1">
                                     <label className="text-xs text-gray-600 dark:text-gray-400">Skal transaksjonen dekkes fra en annen konto?</label>
                                     <select value={coveredByAccountId} onChange={e => setCoveredByAccountId(e.target.value)} className="text-sm px-2 py-1 border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-400 outline-none">

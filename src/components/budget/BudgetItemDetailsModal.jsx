@@ -6,7 +6,7 @@ import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
 import { exclusionReason, EXCLUSION_LABEL } from '../../utils/settlement';
 
 export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, selectedMonth }) {
-    const { transactions, accounts } = useBudget();
+    const { transactions, accounts, allProjects } = useBudget();
 
     // Editing (payer, exclusion, unlinking etc.) happens in the reconcile
     // dialog — same flow as the edit button in the transaction list.
@@ -63,9 +63,9 @@ export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, se
                                         </p>
                                         <div className="flex items-center gap-2">
                                             <p className="text-xs text-gray-500 dark:text-gray-400">{trans.date}</p>
-                                            {exclusionReason(trans, accounts) && (
+                                            {exclusionReason(trans, accounts, allProjects) && (
                                                 <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-[10px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider border border-orange-200 dark:border-orange-800">
-                                                    {EXCLUSION_LABEL[exclusionReason(trans, accounts)]}
+                                                    {EXCLUSION_LABEL[exclusionReason(trans, accounts, allProjects)]}
                                                 </span>
                                             )}
                                         </div>

@@ -8,9 +8,10 @@ import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
 import LiquidityCard from './LiquidityCard';
 import { refundStatus } from '../../utils/refunds';
 import { coveringIncomeIds, isCoverNeutral, isCoveredExpense } from '../../utils/coverage';
+import { isExcludedFromSplit, heldOutOfTransfer, coveredByAccountOf } from '../../utils/settlement';
 
 export default function MyOverview() {
-    const { activeBudget, budgets, transactions, accounts, isMonthReconciled } = useBudget();
+    const { activeBudget, budgets, transactions, accounts, allProjects, isMonthReconciled } = useBudget();
     const { currentUser } = useAuth();
 
     // Month Selection (Default to current)
@@ -75,15 +76,14 @@ export default function MyOverview() {
                 // Fetch ALL transactions
                 const allTransactions = await api.getCollection('transactions');
 
-                // Filter for Shared Budget + Previous Month
-                // AND STRICT FILTER: Only included transactions (those with a budgetItemId)
-                // AND exclude transactions marked as excludeFromSharedCalc
+                // Filter for Shared Budget + Previous Month. Only linked
+                // transactions enter the split (matching Oppgjor.jsx), and
+                // rows held out by their own flag, their project or their
+                // account stay out (utils/settlement.js).
                 const monthTransactions = allTransactions.filter(t =>
                     t.budgetId === sharedBudget.id &&
                     t.month === prevMonthStr &&
-                    t.budgetItemId && // Only linked transactions, matching Budget.jsx
-                    !t.excludeFromSharedCalc && // Exclude flagged transactions
-                    !accounts.find(a => a.id === t.accountId)?.excludeFromSharedCalc // …and accounts flagged to stay out of the split
+                    !isExcludedFromSplit(t, accounts, allProjects)
                 );
 
                 // Calculate totals based on Payer. Income-type transactions
@@ -145,7 +145,7 @@ export default function MyOverview() {
             }
         };
         calculateSharedShare();
-    }, [activeBudget, budgets, prevMonthStr, currentUser, accounts]);
+    }, [activeBudget, budgets, prevMonthStr, currentUser, accounts, allProjects]);
 
     // Pass-through money (utils/coverage.js): a transfer funded by an incoming
     // payment, and that payment, are nobody's consumption — out of every sum.
@@ -161,15 +161,16 @@ export default function MyOverview() {
                 // income on the card (e.g. bill payments) is ignored.
                 if (t.type !== 'expense' && !(t.type === 'income' && t.isRefund)) return false;
                 if (t.refundSplit) return false; // represented by its split children
-                // Held out of the transfer calc, or covered from another account
-                if (t.excludeFromSharedCalc || t.coveredByAccountId) return false;
+                // Held out of the transfer calc, or covered from another
+                // account — on the row or via its project
+                if (heldOutOfTransfer(t, allProjects)) return false;
                 if (isCoverNeutral(t, coveringIds)) return false;
                 // Must be linked to a Credit Card account
                 const account = accounts.find(a => a.id === t.accountId);
                 return account && account.type === 'Kredittkort';
             })
             .reduce((sum, t) => sum + (t.type === 'income' ? -t.amount : t.amount), 0);
-    }, [transactions, prevMonthStr, accounts, activeBudget, coveringIds]);
+    }, [transactions, prevMonthStr, accounts, activeBudget, coveringIds, allProjects]);
 
     // Buffer build-up on the shared bill account (plan made on Oppgjør): my
     // equal share of the monthly extra rides on top of the settlement transfer.
@@ -217,12 +218,12 @@ export default function MyOverview() {
                 if (t.refundSplit) return false; // represented by its split children
                 // «Hold kostnad utenfor» excludes it from the top-up transfer,
                 // whether or not another covering account was specified
-                if (t.excludeFromSharedCalc || t.coveredByAccountId) return false;
+                if (heldOutOfTransfer(t, allProjects)) return false;
                 if (isMoneyMovement(t) || isCoverNeutral(t, coveringIds)) return false;
                 return true;
             })
             .reduce((sum, t) => sum + (t.type === 'income' ? -t.amount : t.amount), 0);
-    }, [transactions, prevMonthStr, billAccounts, activeBudget, coveringIds]);
+    }, [transactions, prevMonthStr, billAccounts, activeBudget, coveringIds, allProjects]);
 
     // 5. Total Calculations
     const totalObligations = totalToJointAccount + billAccountUsage + savingsAmount;
@@ -247,14 +248,14 @@ export default function MyOverview() {
         let spending = 0, otherIncome = 0;
         for (const t of transactions) {
             if (t.month !== selectedMonth || !ids.has(t.accountId)) continue;
-            if (isMoneyMovement(t) || t.coveredByAccountId || t.refundSplit || isCoverNeutral(t, coveringIds)) continue;
+            if (isMoneyMovement(t) || coveredByAccountOf(t, allProjects) || t.refundSplit || isCoverNeutral(t, coveringIds)) continue;
             const amount = parseFloat(t.amount) || 0;
             if (t.type === 'expense') spending += amount;
             else if (t.type === 'income' && t.isRefund) spending -= amount;
             else if (t.type === 'income' && cat(t) !== 'lønn') otherIncome += amount;
         }
         return { spending: Math.round(spending), otherIncome: Math.round(otherIncome) };
-    }, [transactions, selectedMonth, checkingAccounts, activeBudget, coveringIds]);
+    }, [transactions, selectedMonth, checkingAccounts, activeBudget, coveringIds, allProjects]);
 
     // Refunds still expected on this month's purchases (a partner's Vipps
     // etc.). Informational: the purchase is already deducted in full above,

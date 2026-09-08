@@ -74,7 +74,22 @@ function reconcileState(t) {
     return isSelfReported(t) ? 'booked' : 'reconciled';
 }
 
-function txView(t, accountsById, expensesById, budgetsById) {
+// Oppgjør exclusion mirrors utils/settlement.js: the row's own flag, then
+// its project's («Hold alle transaksjoner utenfor fordeling»), then the
+// account's. The covering account likewise comes from the row or its project.
+function exclusionReason(t, accountsById, projectsById) {
+    if (t.excludeFromSharedCalc) return 'transaction';
+    if (t.projectId && projectsById?.get(t.projectId)?.excludeFromSharedCalc) return 'project';
+    if (accountsById?.get(t.accountId)?.excludeFromSharedCalc) return 'account';
+    return null;
+}
+function coveredByAccountOf(t, projectsById) {
+    if (t.coveredByAccountId) return t.coveredByAccountId;
+    const p = t.projectId ? projectsById?.get(t.projectId) : null;
+    return p?.excludeFromSharedCalc ? (p.coveredByAccountId || null) : null;
+}
+
+function txView(t, accountsById, expensesById, budgetsById, projectsById) {
     const view = {
         id: t.id,
         date: t.date,
@@ -90,8 +105,10 @@ function txView(t, accountsById, expensesById, budgetsById) {
     if (t.paidPrivatelyBy) view.paidPrivatelyBy = t.paidPrivatelyBy;
     // Oppgjør flags (mirror Oppgjor.jsx): excluded rows never enter the split;
     // coveredByAccount says which account footed the bill; payer overrides the split.
-    if (t.excludeFromSharedCalc) view.excludeFromSharedCalc = true;
-    if (t.coveredByAccountId) view.coveredByAccount = accountsById.get(t.coveredByAccountId)?.name || t.coveredByAccountId;
+    const excluded = exclusionReason(t, accountsById, projectsById);
+    if (excluded && excluded !== 'account') { view.excludeFromSharedCalc = true; view.excludedBy = excluded; }
+    const coverId = coveredByAccountOf(t, projectsById);
+    if (coverId) view.coveredByAccount = accountsById.get(coverId)?.name || coverId;
     if (t.payer && t.payer !== 'shared') view.payer = t.payer;
     if (t.isRefund) view.isRefund = true;
     if (t.refundSplit) view.refundSplit = true; // parent of a refund split across purchases; its children carry the amounts
@@ -254,7 +271,7 @@ function buildServer() {
 
     server.registerTool('list_transactions', {
         title: 'List transactions',
-        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
+        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`excludedBy` says whether the row itself or its project holds it out; `coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM. Strongly recommended to limit the result.'),
             budgetId: z.string().optional(),
@@ -266,15 +283,17 @@ function buildServer() {
         },
     }, async ({ month, budgetId, accountId, search, type, onlyUnreconciled, limit }) => {
         if (month) parseMonth(month);
-        const [transactions, accounts, expenses, budgets] = await Promise.all([
+        const [transactions, accounts, expenses, budgets, projects] = await Promise.all([
             queryEq('transactions', { month, budgetId, accountId, type }),
             getCollection('accounts'),
             getCollection('expenses'),
             getCollection('budgets'),
+            getCollection('projects'),
         ]);
         const accountsById = new Map(accounts.map(a => [a.id, a]));
         const expensesById = new Map(expenses.map(e => [e.id, e]));
         const budgetsById = new Map(budgets.map(b => [b.id, b]));
+        const projectsById = new Map(projects.map(p => [p.id, p]));
 
         let result = transactions;
         if (search) result = result.filter(t => (t.name || '').toLowerCase().includes(search.toLowerCase()));
@@ -284,7 +303,7 @@ function buildServer() {
         return ok({
             totalMatching: result.length,
             returned: capped.length,
-            transactions: capped.map(t => txView(t, accountsById, expensesById, budgetsById)),
+            transactions: capped.map(t => txView(t, accountsById, expensesById, budgetsById, projectsById)),
         });
     });
 
@@ -431,6 +450,7 @@ function buildServer() {
                 name: p.name,
                 description: p.description || null,
                 targetAmount: p.targetAmount ?? null,
+                excludeFromSharedCalc: !!p.excludeFromSharedCalc, // every transaction on the project stays out of the settlement split
                 spent: Math.round(spent * 100) / 100,
                 remaining: p.targetAmount != null ? Math.round((p.targetAmount - spent) * 100) / 100 : null,
                 bySubcategory,
@@ -540,14 +560,15 @@ function bufferContributionPerParty(plan, month, parties) {
 // the nearest hundred), verified against the app 2026-08-21.
 const ROUNDING_MODE = 100;
 
-function computeOppgjor({ shared, accounts, txs, month }) {
+function computeOppgjor({ shared, accounts, projects = [], txs, month }) {
     const members = shared.members || [];
     const owner = members.find(m => m.role === 'owner') || members[0] || null;
     const partner = members.find(m => m !== owner) || null;
     const parties = members.length || 2;
 
-    const excludedAccounts = new Set(accounts.filter(a => a.excludeFromSharedCalc).map(a => a.id));
-    const splitTx = txs.filter(t => t.budgetItemId && !t.excludeFromSharedCalc && !excludedAccounts.has(t.accountId));
+    const accountsById = new Map(accounts.map(a => [a.id, a]));
+    const projectsById = new Map(projects.map(p => [p.id, p]));
+    const splitTx = txs.filter(t => t.budgetItemId && !exclusionReason(t, accountsById, projectsById));
     const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
     const totalSharedActual = sum(splitTx.filter(t => !t.payer || t.payer === 'shared'));
     const selfActual = sum(splitTx.filter(t => t.payer === 'self'));
@@ -613,10 +634,11 @@ export const ha = onRequest({
 
     try {
         const month = osloToday().slice(0, 7);
-        const [budgets, expenses, accounts] = await Promise.all([
+        const [budgets, expenses, accounts, projects] = await Promise.all([
             getCollection('budgets'),
             getCollection('expenses'),
             getCollection('accounts'),
+            getCollection('projects'),
         ]);
         const shared = budgets.find(b => b.type === 'shared');
         if (!shared) {
@@ -642,7 +664,7 @@ export const ha = onRequest({
                 budget: shared.name,
                 dagligvarer: lineActual('dagligvarer'),
             },
-            oppgjor: computeOppgjor({ shared, accounts, txs, month }),
+            oppgjor: computeOppgjor({ shared, accounts, projects, txs, month }),
         });
     } catch (err) {
         console.error('HA feed failed:', err);
