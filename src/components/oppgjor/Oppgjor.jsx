@@ -188,11 +188,6 @@ export default function Oppgjor() {
                         </div>
                     )}
 
-                    {/* Buffer på felles regningskonto */}
-                    {bufferAccounts.map(a => (
-                        <BufferCard key={a.id} account={a} parties={parties} settlementMonth={selectedMonth} />
-                    ))}
-
                     {/* Dekkes fra andre kontoer */}
                     {coveredFromList.length > 0 && (
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
@@ -218,6 +213,11 @@ export default function Oppgjor() {
                             </div>
                         </div>
                     )}
+
+                    {/* Buffer på felles regningskonto */}
+                    {bufferAccounts.map(a => (
+                        <BufferCard key={a.id} account={a} parties={parties} settlementMonth={selectedMonth} />
+                    ))}
 
                     {/* Rødt flagg: penger som skulle komme inn og gå videre, men ikke henger sammen */}
                     {coverProblems.length > 0 && (
