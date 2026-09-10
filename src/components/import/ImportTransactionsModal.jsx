@@ -3,6 +3,7 @@ import { X, Download, CheckCircle2, AlertTriangle, Loader2, Calendar } from 'luc
 import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
 import { fxPlausible } from '../../utils/currency';
+import { isSelfReported } from '../../utils/reconciliation';
 
 const datesClose = (d1, d2, tol = 4) => {
     const diff = Math.abs(new Date(d2) - new Date(d1));
@@ -21,8 +22,14 @@ const looksLikePlaceholder = (name) => {
 // even before booking, so it can't be trusted). The status/name checks stay as
 // a fallback for row types we haven't seen yet.
 const PLACEHOLDER_ID_SUFFIX = ':000000000000000000';
+// Card reservations (a weekend purchase before the bank books it) come with
+// a `recent:<hash>` nonUniqueId that is REPLACED by a real one on booking
+// (seen 2026-09-09: six purchases re-ided overnight). Importing them early
+// therefore guarantees a twin later — they wait for booking like Nettgiro.
+const isRecentId = (id) => typeof id === 'string' && id.includes(':recent:');
 const isUnbooked = (s) =>
     (typeof s.externalId === 'string' && s.externalId.endsWith(PLACEHOLDER_ID_SUFFIX)) ||
+    isRecentId(s.externalId) ||
     (s.bookingStatus ? s.bookingStatus !== 'BOOKED' : looksLikePlaceholder(s.name));
 
 const firstOfThisMonth = () => {
@@ -93,7 +100,23 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
             // its real id) — that is an orphan, not something still waiting, so
             // it is skipped silently rather than counted as pending.
             if (isUnbooked(s)) {
-                if (!latestSync || s.syncedAt === latestSync) pendingRows.push(s);
+                if (!latestSync || s.syncedAt === latestSync) {
+                    // Say what the app already holds for it, so the list reads
+                    // as "waiting for the bank", not "not fetched".
+                    const pacc = accByKey.get(s.accountKey);
+                    const already = existingByExternalId.get(s.externalId);
+                    const logged = !already && pacc && existing.find(t =>
+                        t.accountId === pacc.id && !t.externalId && (!t.currency || t.currency === 'NOK') &&
+                        Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 && t.date && datesClose(t.date, s.date));
+                    const note = already
+                        ? (isSelfReported({ source: already.origin })
+                            ? `allerede i appen som «${already.name}» — beholder navnet, får bankens ID ved bokføring`
+                            : 'allerede hentet — får bankens navn og ID ved bokføring')
+                        : logged
+                            ? `logget i companion-appen som «${logged.name}» — kobles ved bokføring`
+                            : 'ny — hentes når banken har bokført den';
+                    pendingRows.push({ ...s, pendingNote: note });
+                }
                 continue;
             }
             const acc = accByKey.get(s.accountKey);
@@ -121,14 +144,18 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 &&
                 t.date && datesClose(t.date, s.date)
             );
-            // A previously imported placeholder ("Nettgiro") that has now been
-            // booked under a new externalId and real name: fold the booked row
-            // into it instead of creating a twin. Reconciled ones qualify too —
-            // the placeholder name carries no information worth preserving.
+            // A previously imported placeholder ("Nettgiro") or card reservation
+            // (`recent:` id) that has now been booked under a new externalId:
+            // fold the booked row into it instead of creating a twin.
+            // Reconciled ones qualify too. The bank's booked name and date
+            // replace the row's — a placeholder or reservation name carries
+            // nothing worth keeping ("Straksbetaling" → the real counterparty)
+            // — except when the row is really the companion app's (merged
+            // into on an earlier import): its own name and purchase date stay.
             const rebook = !match && existing.find(t =>
                 t.accountId === acc.id && t.externalId && t.externalId !== s.externalId &&
                 !rebookedIds.has(t.id) &&
-                (looksLikePlaceholder(t.name) || String(t.externalId).endsWith(PLACEHOLDER_ID_SUFFIX)) &&
+                (looksLikePlaceholder(t.name) || String(t.externalId).endsWith(PLACEHOLDER_ID_SUFFIX) || isRecentId(t.externalId)) &&
                 t.type === s.type &&
                 Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 &&
                 t.date && datesClose(t.date, s.date, 7)
@@ -152,6 +179,10 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                     existingId: match.id,
                     externalId: s.externalId,
                     reconciled: !!(match.reconciled || match.budgetItemId),
+                    // `source` becomes the bank's, so remember where the row
+                    // really came from: a companion-app row keeps its own name
+                    // and purchase date if the bank later re-ids it.
+                    origin: match.source || null,
                 });
             } else if (fx) {
                 fxClaimedIds.add(fx.id);
@@ -169,6 +200,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                         amount: s.amount,
                         externalId: s.externalId,
                         source: 'sb1',
+                        origin: fx.source || null,
                         currency: null,
                         originalAmount: fx.amount,
                         originalCurrency: fx.currency,
@@ -184,12 +216,15 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 });
             } else if (rebook) {
                 rebookedIds.add(rebook.id);
+                const keepIdentity = isRecentId(rebook.externalId) && isSelfReported({ source: rebook.origin });
                 toRebook.push({
                     id: rebook.id,
-                    name: s.name || rebook.name,
-                    date: s.date,
-                    month: (s.date || '').slice(0, 7),
                     externalId: s.externalId,
+                    ...(keepIdentity ? {} : {
+                        name: s.name || rebook.name,
+                        date: s.date,
+                        month: (s.date || '').slice(0, 7),
+                    }),
                 });
             } else {
                 toCreate.push({
@@ -221,7 +256,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 });
             }
             for (const m of plan.toMerge) {
-                await api.updateDocument('transactions', m.existingId, { externalId: m.externalId, source: 'sb1', reconciled: m.reconciled });
+                await api.updateDocument('transactions', m.existingId, { externalId: m.externalId, source: 'sb1', reconciled: m.reconciled, origin: m.origin });
             }
             for (const u of plan.toUpdate) {
                 await api.updateDocument('transactions', u.id, { name: u.name });
@@ -332,12 +367,15 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                                     )}
                                     {plan.pendingRows.length > 0 && (
                                         <div className="space-y-1">
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">Ubokførte betalinger og reservasjoner hoppes over — de hentes automatisk når banken har bokført dem:</p>
-                                            <div className="border border-gray-100 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-700 text-xs max-h-32 overflow-y-auto">
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Ubokførte betalinger og kortreservasjoner venter til banken har bokført dem — rader du allerede har, kobles da automatisk:</p>
+                                            <div className="border border-gray-100 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-700 text-xs max-h-40 overflow-y-auto">
                                                 {plan.pendingRows.slice(0, 8).map((s, i) => (
-                                                    <div key={s.externalId || i} className="flex justify-between px-3 py-1.5 text-gray-600 dark:text-gray-400">
-                                                        <span className="truncate">{s.date} • {s.name}</span>
-                                                        <span className="whitespace-nowrap ml-2">{(s.amount || 0).toLocaleString('no-NO')} kr</span>
+                                                    <div key={s.externalId || i} className="px-3 py-1.5 text-gray-600 dark:text-gray-400">
+                                                        <div className="flex justify-between">
+                                                            <span className="truncate">{s.date} • {s.name}</span>
+                                                            <span className="whitespace-nowrap ml-2">{(s.amount || 0).toLocaleString('no-NO')} kr</span>
+                                                        </div>
+                                                        {s.pendingNote && <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{s.pendingNote}</div>}
                                                     </div>
                                                 ))}
                                                 {plan.pendingRows.length > 8 && (

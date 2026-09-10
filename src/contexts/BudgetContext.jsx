@@ -389,8 +389,15 @@ export function BudgetProvider({ children }) {
             // the bank-side identity (externalId/source) even when the kept
             // copy is the self-reported one — the next import then recognizes
             // it, and the row no longer counts as awaiting a bank match.
-            externalId: prefer('externalId'),
+            // A card reservation's `recent:` id is replaced by the bank on
+            // booking, so a booked id always wins — otherwise the next import
+            // would recreate the booked twin that was just merged away.
+            externalId: [keep.externalId, remove.externalId].filter(Boolean)
+                .sort((a, b) => (String(a).includes(':recent:') ? 1 : 0) - (String(b).includes(':recent:') ? 1 : 0))[0] ?? null,
             source: (isSelfReported(keep) && !isSelfReported(remove) ? remove.source : keep.source) ?? null,
+            // Remember the self-reported side (see ImportTransactionsModal):
+            // if the bank re-ids the row later, it keeps its own name/date.
+            origin: keep.origin || remove.origin || (isSelfReported(keep) ? keep.source : isSelfReported(remove) ? remove.source : null),
             // Merging a self-reported copy (companion app/MCP) with the bank's
             // copy IS the bank match — that is what makes the pair avstemt,
             // provided the purchase is also categorized.

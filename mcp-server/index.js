@@ -102,6 +102,10 @@ function txView(t, accountsById, expensesById, budgetsById, projectsById) {
         category: t.category || null,
         reconcileState: reconcileState(t),
     };
+    // Provenance: where the row came from and the bank's stable id — lets a
+    // duplicate pair (companion copy vs. bank copy) be told apart.
+    if (t.source) view.source = t.source;
+    if (t.externalId) view.externalId = t.externalId;
     if (t.paidPrivatelyBy) view.paidPrivatelyBy = t.paidPrivatelyBy;
     // Oppgjør flags (mirror Oppgjor.jsx): excluded rows never enter the split;
     // coveredByAccount says which account footed the bill; payer overrides the split.
