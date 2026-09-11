@@ -1,6 +1,7 @@
 import MigrationTool from './MigrationTool';
 import CategoryBudgetManager from './CategoryBudgetManager';
 import PartnerSettings from './PartnerSettings';
+import SalarySettings from './SalarySettings';
 import ResetTool from './ResetTool';
 
 /**
@@ -14,6 +15,7 @@ export default function Settings() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Innstillinger</h1>
             <MigrationTool />
             <CategoryBudgetManager />
+            <SalarySettings />
             <PartnerSettings />
             <ResetTool />
         </div>
