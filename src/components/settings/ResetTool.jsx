@@ -8,6 +8,16 @@ import { api } from '../../services/firebase';
 const BUDGET_SCOPED = ['transactions', 'expenses', 'monthlyBudgets', 'monthStatuses'];
 const GLOBAL_SCOPED = ['receipts', 'receiptItems'];
 
+// What each collection means to the user (shown in the count grid)
+const COLLECTION_LABEL = {
+    transactions: 'Transaksjoner',
+    expenses: 'Budsjettposter i budsjettene',
+    monthlyBudgets: 'Månedsbeløp (overstyringer)',
+    monthStatuses: 'Avstemt-merking av måneder',
+    receipts: 'Kvitteringer (Dagligvarer)',
+    receiptItems: 'Varelinjer (Dagligvarer)',
+};
+
 const chunk = (arr, n) => arr.reduce((acc, _, i) => (i % n ? acc : [...acc, arr.slice(i, i + n)]), []);
 
 /**
@@ -104,7 +114,7 @@ export default function ResetTool() {
                 </div>
                 <div>
                     <h3 className="font-bold text-gray-900 dark:text-white">Faresone: nullstill forbruk &amp; budsjettbeløp</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Beholder bibliotek, kontoer og budsjett. Kan ikke angres.</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Beholder bibliotek, kontoer og budsjett. Sletter også alle kvitteringer og varelinjer under Dagligvarer, og fjerner «avstemt»-merkingen på alle måneder. Kan ikke angres.</p>
                 </div>
             </div>
 
@@ -115,7 +125,7 @@ export default function ResetTool() {
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4 text-sm">
                         {data && Object.entries(data).map(([col, arr]) => (
                             <div key={col} className="flex justify-between bg-gray-50 dark:bg-gray-700/30 rounded-lg px-3 py-2">
-                                <span className="text-gray-600 dark:text-gray-400">{col}</span>
+                                <span className="text-gray-600 dark:text-gray-400" title={col}>{COLLECTION_LABEL[col] || col}</span>
                                 <span className="font-bold text-gray-900 dark:text-gray-100">{arr.length}</span>
                             </div>
                         ))}

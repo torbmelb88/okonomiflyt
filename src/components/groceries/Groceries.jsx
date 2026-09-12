@@ -10,6 +10,7 @@ import {
 import { useBudget } from '../../contexts/BudgetContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import ConfirmationModal from '../common/ConfirmationModal';
+import InfoTip from '../common/InfoTip';
 import { CATEGORY_LABELS, CATEGORY_COLORS, formatKr, canonicalizeVareName, chainGroupOf, chainLabel } from '../../utils/groceryCategories';
 import clsx from 'clsx';
 
@@ -167,6 +168,7 @@ export default function Groceries() {
                     <button
                         key={chain}
                         onClick={() => switchChain(chain)}
+                        title="Alt på siden gjelder bare den valgte kjeden — kjedene navngir varer ulikt, så statistikken holdes adskilt"
                         className={clsx(
                             "px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 -mb-px transition-colors capitalize",
                             chain === selectedChain
@@ -181,9 +183,9 @@ export default function Groceries() {
 
             {/* Summary cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <SummaryCard label="Handlet denne måneden" value={formatKr(totals.monthSum)} />
+                <SummaryCard label="Handlet denne måneden" value={formatKr(totals.monthSum)} hint="Sum av kvitteringene fra denne kjeden i inneværende måned. Alt på siden gjelder bare den valgte kjeden." />
                 <SummaryCard label="Kvitteringer totalt" value={totals.receiptCount} />
-                <SummaryCard label="Spart på tilbud" value={formatKr(totals.savedOnDiscounts)} accent />
+                <SummaryCard label="Spart på tilbud" value={formatKr(totals.savedOnDiscounts)} accent hint="Sum av alle rabatter på kvitteringene fra denne kjeden — hele historikken, ikke bare denne måneden." />
             </div>
 
             {/* Category spend per month */}
@@ -258,8 +260,8 @@ export default function Groceries() {
                                     <tr>
                                         <th className="py-2 pr-3">Vare</th>
                                         <th className="py-2 pr-3 text-right">Kjøp</th>
-                                        <th className="py-2 pr-3 text-right">Sist betalt</th>
-                                        <th className="py-2 text-right">Utvikling</th>
+                                        <th className="py-2 pr-3 text-right" title="Enhetsprisen du faktisk betalte sist, altså etter rabatt">Sist betalt</th>
+                                        <th className="py-2 text-right" title="Endring i ordinær enhetspris fra første til siste registrerte kjøp — rabatter er holdt utenfor">Utvikling</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -412,7 +414,7 @@ function CategoryBreakdown({ row, prevRow, isCurrentMonth }) {
     );
 }
 
-function SummaryCard({ label, value, accent }) {
+function SummaryCard({ label, value, accent, hint }) {
     return (
         <div className={clsx(
             "rounded-xl p-4 border",
@@ -420,7 +422,7 @@ function SummaryCard({ label, value, accent }) {
                 ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800"
                 : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700"
         )}>
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{label}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-1">{label}{hint && <InfoTip text={hint} />}</p>
             <p className={clsx(
                 "text-xl font-bold mt-1",
                 accent ? "text-emerald-700 dark:text-emerald-300" : "text-gray-900 dark:text-white"
@@ -484,6 +486,7 @@ function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, 
                             )}>
                                 {isMatched ? 'Koblet' : 'Umatchet'}
                             </span>
+                            {!isMatched && <InfoTip className="ml-1" text="Kvitteringen er ikke knyttet til en transaksjon ennå. Appen foreslår transaksjoner med samme beløp innen tre dager — koble den for å se varelinjene fra transaksjonslisten." />}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                             {receipt.date} · {formatKr(receipt.total)}{receipt.itemCount ? ` · ${receipt.itemCount} varer` : ''}

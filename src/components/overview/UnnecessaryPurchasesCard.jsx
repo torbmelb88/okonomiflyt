@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Edit2, Flame } from 'lucide-react';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
+import InfoTip from '../common/InfoTip';
 
 /**
  * «Unødvendige kjøp» — the transactions the companion app (or the reconcile
@@ -49,6 +50,7 @@ export default function UnnecessaryPurchasesCard({ transactions, selectedMonth, 
                         {flagged.length === 0
                             ? 'Ingen merkede kjøp'
                             : `${flagged.length} kjøp${shareOfDisposable !== null ? ` · ${shareOfDisposable} % av disponibelt` : ''}`}
+                        {flagged.length > 0 && shareOfDisposable !== null && <InfoTip className="ml-1" text="Hvor stor del av månedens «Disponibelt» som gikk til kjøp du selv har merket som unødvendige. Ren bevisstgjøring — kjøpene teller helt normalt ellers." />}
                         <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                             {formatMonth(prevMonth)}: {prevTotal.toLocaleString('no-NO')} kr
                         </div>

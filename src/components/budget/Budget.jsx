@@ -6,6 +6,7 @@ import AddBudgetItemModal from './AddBudgetItemModal';
 import BudgetItemDetailsModal from './BudgetItemDetailsModal';
 import AnnualBudgetPlannerModal from './AnnualBudgetPlannerModal';
 import { isVirtualExpense, SCOPE_LABEL } from '../../utils/categoryMigration';
+import InfoTip from '../common/InfoTip';
 import clsx from 'clsx';
 
 function BudgetAmountInput({ value, onCommit, className }) {
@@ -155,7 +156,9 @@ export default function Budget() {
                 </button>
                 <div className="text-center">
                     <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 capitalize">{formatMonth(selectedMonth)}</h2>
-                    <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">Planlagt budsjett: <span className="font-medium">{totalBudgeted.toLocaleString('no-NO')} kr</span></div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center justify-center gap-1">Planlagt budsjett: <span className="font-medium">{totalBudgeted.toLocaleString('no-NO')} kr</span>
+                        <InfoTip text="Summen av alle planlagte beløp denne måneden, inkludert den automatiske fellesandelen. Forbruk-siden kan vise en lavere sum, fordi poster merket «utenfor statistikk» ikke er med der." />
+                    </div>
                 </div>
                 <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
                     <ArrowRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -211,8 +214,8 @@ export default function Budget() {
                                     <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
                                         {row.category}
                                         {row.scope === 'both' && <span className="ml-1 text-purple-500">· {SCOPE_LABEL.both}</span>}
-                                        {row.isOverride && <span className="ml-1 text-blue-500">· overstyrt</span>}
-                                        {!row.materialized && !row.isVirtual && <span className="ml-1 text-gray-400">· ikke satt</span>}
+                                        {row.isOverride && <span className="ml-1 text-blue-500" title="Denne måneden har et eget beløp som overstyrer postens standardbeløp — pilen ved siden av setter det tilbake">· overstyrt</span>}
+                                        {!row.materialized && !row.isVirtual && <span className="ml-1 text-gray-400" title="Posten finnes i biblioteket, men er ikke tatt i bruk i dette budsjettet ennå — skriv inn et beløp for å aktivere den">· ikke satt</span>}
                                     </div>
                                 </div>
                             </div>

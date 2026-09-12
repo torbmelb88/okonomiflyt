@@ -130,7 +130,7 @@ export default function BufferCard({ account, parties, settlementMonth }) {
                             <div className="font-semibold text-gray-900 dark:text-gray-100">{kr(target)}</div>
                         </div>
                         <div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">Avvik</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400" title="Hvor mye som mangler opp til buffermålet målt mot dagens saldo. Overskudd vises ikke her — bunnpunktet rett før påfyll i grafen under er fasiten.">Avvik</div>
                             <div className={`font-semibold ${ok ? 'text-green-700 dark:text-green-300' : 'text-amber-700 dark:text-amber-300'}`}>{ok ? '0 kr' : `−${kr(gap)}`}</div>
                         </div>
                     </div>

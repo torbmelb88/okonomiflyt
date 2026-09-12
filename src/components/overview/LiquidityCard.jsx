@@ -1,4 +1,5 @@
 import { Activity, CheckCircle2, Clock } from 'lucide-react';
+import InfoTip from '../common/InfoTip';
 
 /**
  * Likviditet — the month's final in-minus-out on the personal budget.
@@ -25,7 +26,9 @@ export default function LiquidityCard({ leftToSpend, checkingSpending, checkingO
                         <Activity className="w-6 h-6 text-teal-600 dark:text-teal-400" />
                     </div>
                     <div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Likviditet</h3>
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">Likviditet
+                            <InfoTip text="Det som faktisk blir igjen på brukskontoen: «Til forbruk» minus det som allerede er brukt fra kontoen denne måneden, pluss andre inntekter enn lønn. Overføringer og kortregninger er holdt utenfor, siden de ligger i forpliktelsene." />
+                        </h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">Inn minus ut i {formatMonth(selectedMonth)}</p>
                     </div>
                 </div>

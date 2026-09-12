@@ -308,7 +308,7 @@ export default function Projects() {
                                                     </span>
                                                 )}
                                                 {project.excludeFromSharedCalc && (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300" title="Alle transaksjoner på prosjektet holdes utenfor fordelingen på Oppgjør">
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300" title="Alle transaksjoner på prosjektet holdes utenfor fordelingen på Oppgjør. Er en dekningskonto valgt, vises beløpet under «Dekkes fra andre kontoer» der — penger som skal overføres fra den kontoen til felles regningskonto.">
                                                         <Ban className="w-3 h-3" />
                                                         Utenfor fordeling{project.coveredByAccountId ? ` · dekkes fra ${accounts.find(a => a.id === project.coveredByAccountId)?.name || 'annen konto'}` : ''}
                                                     </span>
@@ -323,7 +323,7 @@ export default function Projects() {
                                             {/* Stats row */}
                                             <div className="flex flex-wrap gap-4 text-sm">
                                                 {spent !== null && (
-                                                    <span className="text-gray-700 dark:text-gray-300 font-medium">
+                                                    <span className="text-gray-700 dark:text-gray-300 font-medium" title="Summen av alle transaksjoner på prosjektet, uansett måned og budsjett. Refusjoner og returer trekkes fra.">
                                                         {spent.toLocaleString('no-NO')} kr brukt
                                                     </span>
                                                 )}

@@ -82,13 +82,13 @@ export default function TransactionsPanel({
         { key: 'companion', label: 'Companion-app', Icon: Smartphone, test: (t) => t.source === 'companion_app' },
         { key: 'sb1', label: 'Bank (SB1)', Icon: Landmark, test: (t) => t.source === 'sb1' },
         { key: 'invoice', label: 'Kortfaktura', Icon: FileText, test: (t) => t.source === 'trumf-invoice' },
-        { key: 'manual', label: 'Manuell/CSV', Icon: Upload, test: (t) => !t.source },
+        { key: 'manual', label: 'Manuell/CSV', Icon: Upload, test: (t) => !t.source, hint: 'Lagt inn for hånd eller via CSV-fil — ikke fra bank, companion-app eller kortfaktura' },
         { key: 'creditcard', label: 'Kredittkort', Icon: CreditCard, test: (t) => creditCardIds.has(t.accountId) },
-        { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t) },
-        { key: 'booked', label: 'Venter avstemming', Icon: null, test: (t) => reconcileState(t) === 'booked' },
-        { key: 'awaitingRefund', label: 'Venter refusjon', Icon: null, test: (t) => !!t.awaitingRefund },
-        { key: 'cover', label: 'Dekning', Icon: ArrowLeftRight, test: (t) => coverGroupById.has(t.id) },
-        { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy },
+        { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t), hint: 'Ikke knyttet til en budsjettpost ennå — teller ikke i forbruket' },
+        { key: 'booked', label: 'Venter avstemming', Icon: null, test: (t) => reconcileState(t) === 'booked', hint: 'Registrert i companion-appen og kategorisert, men bankens kopi har ikke kommet inn ennå' },
+        { key: 'awaitingRefund', label: 'Venter refusjon', Icon: null, test: (t) => !!t.awaitingRefund, hint: 'Kjøp noen skal betale tilbake, der innbetalingen ikke er koblet ennå' },
+        { key: 'cover', label: 'Dekning', Icon: ArrowLeftRight, test: (t) => coverGroupById.has(t.id), hint: 'Penger på gjennomreise: utbetalinger som dekkes av en innbetaling, og innbetalingene som dekker dem' },
+        { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy, hint: 'Felles utgifter betalt fra egen konto — trekkes fra det du skal overføre' },
         { key: 'receipt', label: 'Kvittering', Icon: ReceiptText, test: (t) => !!t.receiptId || receipts.some(r => r.transactionId === t.id) },
     ];
     const toggleFilter = (key) => setActiveFilters(prev =>
@@ -154,10 +154,11 @@ export default function TransactionsPanel({
     // One combined summary for bank + credit card. Money movement (bill
     // payments, transfers, savings) is excluded via category, so card
     // purchases count once and the payment of the card bill counts never.
+    const summaryHint = 'Sum av radene under, men overføringer, sparing, kortregninger og penger på gjennomreise er holdt utenfor, og returer er trukket fra «Ut».';
     const summaryItems = [
-        { label: 'Inn', text: `+${fmtKr(incomeTotal)}`, cls: green },
-        { label: 'Ut', text: `-${fmtKr(expenseTotal)}`, cls: red },
-        { label: 'Netto', text: fmtKr(netTotal), cls: netTotal >= 0 ? green : red },
+        { label: 'Inn', text: `+${fmtKr(incomeTotal)}`, cls: green, hint: summaryHint },
+        { label: 'Ut', text: `-${fmtKr(expenseTotal)}`, cls: red, hint: summaryHint },
+        { label: 'Netto', text: fmtKr(netTotal), cls: netTotal >= 0 ? green : red, hint: summaryHint },
     ];
 
     // Refunded amount per original transaction, for the "returnert" badge
@@ -236,7 +237,7 @@ export default function TransactionsPanel({
                     <div className="hidden md:flex items-center space-x-6">
                         {summaryItems.map((item, i) => (
                             <div key={item.label} className={clsx('text-right', i > 0 && 'pl-6 border-l border-gray-200 dark:border-gray-700')}>
-                                <div className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">{item.label}</div>
+                                <div className="text-xs text-gray-400 uppercase tracking-wider mb-0.5" title={item.hint}>{item.label}</div>
                                 <div className={clsx('font-bold text-lg', item.cls)}>{item.text}</div>
                             </div>
                         ))}
@@ -287,7 +288,7 @@ export default function TransactionsPanel({
                     ))}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    <button onClick={handleDeleteAllTransactions} className="flex items-center space-x-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 text-red-700 font-medium shadow-sm text-sm">
+                    <button onClick={handleDeleteAllTransactions} title="Sletter alle transaksjonene som vises akkurat nå — valgt måned, konto og filtre. Kan ikke angres." className="flex items-center space-x-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 text-red-700 font-medium shadow-sm text-sm">
                         <Trash2 className="w-4 h-4" />
                         <span>Slett alle</span>
                     </button>
@@ -306,6 +307,7 @@ export default function TransactionsPanel({
                         <button
                             key={f.key}
                             onClick={() => toggleFilter(f.key)}
+                            title={f.hint}
                             className={clsx(
                                 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
                                 activeFilters.includes(f.key)
@@ -395,7 +397,7 @@ export default function TransactionsPanel({
                                                     </span>
                                                 )}
                                                 {trans.paidPrivatelyBy && (
-                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider">Utlegg</span>
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider" title="Felles utgift betalt fra egen konto — beløpet trekkes fra det du skal overføre til felleskontoen">Utlegg</span>
                                                 )}
                                                 {trans.refundSplit && (
                                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title="Innbetalingen er fordelt på flere kjøp — beløpet telles via de fordelte radene, ikke denne">
@@ -440,10 +442,10 @@ export default function TransactionsPanel({
                                                     </span>
                                                 )}
                                                 {reconcileState(trans) === 'reconciled'
-                                                    ? <span className="text-green-600 dark:text-green-400">✓ Avstemt</span>
+                                                    ? <span className="text-green-600 dark:text-green-400" title="Knyttet til en budsjettpost og bekreftet mot banken — rader importert fra banken blir avstemt i det de knyttes">✓ Avstemt</span>
                                                     : reconcileState(trans) === 'booked'
                                                         ? <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-bold uppercase tracking-wider" title="Bokført, men ikke matchet mot en banktransaksjon ennå — avstemmes når bankens kopi kommer inn via import">Bokført</span>
-                                                        : <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider">Uavstemt</span>}
+                                                        : <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider" title="Ikke knyttet til en budsjettpost ennå, så beløpet teller ikke i forbruket — trykk blyanten for å avstemme">Uavstemt</span>}
                                             </div>
                                             {trans.comment && (
                                                 <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 italic">💬 {trans.comment}</div>

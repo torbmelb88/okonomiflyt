@@ -99,6 +99,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
 
                     <div className="space-y-2">
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Kontotype</label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Styrer beregningene: Kredittkort-forbruk havner i «Til Felleskonto» på Min Oversikt, Sparing-kontoer vises på Sparing-siden, og Bankkonto (som ikke er regningskonto) brukes i Likviditet.</p>
                         <div className="grid grid-cols-3 gap-3">
                             {accountTypes.map((t) => (
                                 <button

@@ -8,6 +8,7 @@ import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
 import LiquidityCard from './LiquidityCard';
 import BufferCard from '../oppgjor/BufferCard';
+import InfoTip from '../common/InfoTip';
 import { refundStatus } from '../../utils/refunds';
 import { coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
 import { isExcludedFromSplit, heldOutOfTransfer, coveredByAccountOf } from '../../utils/settlement';
@@ -123,10 +124,12 @@ export default function MyOverview() {
                 // transactions enter the split (matching Oppgjor.jsx), and
                 // rows held out by their own flag, their project or their
                 // account stay out (utils/settlement.js).
+                const covering = coveringIncomeIds(allTransactions);
                 const monthTransactions = allTransactions.filter(t =>
                     t.budgetId === sharedBudget.id &&
                     t.month === prevMonthStr &&
-                    !isExcludedFromSplit(t, accounts, allProjects)
+                    !isExcludedFromSplit(t, accounts, allProjects) &&
+                    !isCoverNeutral(t, covering) // pass-through money, same as Oppgjør
                 );
 
                 // Calculate totals based on Payer. Income-type transactions
@@ -357,10 +360,7 @@ export default function MyOverview() {
                     <div className="min-w-0">
                         <div className="flex items-center gap-2">
                             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Din Lønn (Netto)</h2>
-                            <Info
-                                className="w-4 h-4 text-gray-400 cursor-help"
-                                title="Transaksjoner merket «Lønn» vinner alltid. Til de kommer kan du legge inn beløpet fra lønnsslippen for denne måneden, eller la anslaget fra Innstillinger gjelde."
-                            />
+                            <InfoTip text="Transaksjoner merket «Lønn» vinner alltid. Til de kommer kan du legge inn beløpet fra lønnsslippen for denne måneden («Foreløpig»), eller la ca. lønn fra Innstillinger gjelde («Anslag»). Begge erstattes automatisk av den ekte transaksjonen." />
                             {sourceBadge(salary.source)}
                         </div>
                         <p className="text-sm text-gray-500 dark:text-gray-400">{SALARY_SOURCE_LABEL[salary.source]}</p>
@@ -413,13 +413,17 @@ export default function MyOverview() {
 
                             <div className="space-y-3 mb-6">
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600 dark:text-gray-400">Andel fellesutgifter ({formatMonth(prevMonthStr)})</span>
+                                    <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Andel fellesutgifter ({formatMonth(prevMonthStr)})
+                                        <InfoTip text="Din andel av forrige måneds fellesutgifter etter fordelingsnøkkelen, minus utlegg du har lagt ut. Samme tall som «Du betaler» på Oppgjør. Uavstemte kjøp teller ikke — de må knyttes til en budsjettpost først." />
+                                    </span>
                                     <span className="font-medium text-gray-900 dark:text-white">
                                         {loadingShared ? '...' : sharedShareAmount.toLocaleString('no-NO')} kr
                                     </span>
                                 </div>
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600 dark:text-gray-400">Kredittkort ({formatMonth(prevMonthStr)})</span>
+                                    <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Kredittkort ({formatMonth(prevMonthStr)})
+                                        <InfoTip text="Ditt private kredittkortforbruk forrige måned, som forfaller nå. Felleskjøp på kortet ligger i «Andel fellesutgifter», ikke her. Returer trekkes fra." />
+                                    </span>
                                     <span className="font-medium text-gray-900 dark:text-white">{creditCardUsage.toLocaleString('no-NO')} kr</span>
                                 </div>
                                 {bufferContribution > 0 && (
@@ -458,7 +462,9 @@ export default function MyOverview() {
 
                                 <div className="space-y-3 mb-6">
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-gray-600 dark:text-gray-400">Faktisk forbruk ({formatMonth(prevMonthStr)})</span>
+                                        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Faktisk forbruk ({formatMonth(prevMonthStr)})
+                                            <InfoTip text="Så mye gikk faktisk ut fra regningskontoen forrige måned — det er beløpet du fyller på nå. Overføringer, sparing og kortregninger er holdt utenfor." />
+                                        </span>
                                         <span className="font-medium text-gray-900 dark:text-white">{billAccountUsage.toLocaleString('no-NO')} kr</span>
                                     </div>
                                     {billBufferContribution > 0 && (
@@ -544,7 +550,9 @@ export default function MyOverview() {
                     <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-6 rounded-2xl shadow-lg text-white">
                         <div className="flex items-start justify-between mb-8">
                             <div>
-                                <h3 className="text-xl font-bold opacity-90">Til Forbruk</h3>
+                                <h3 className="text-xl font-bold opacity-90 flex items-center gap-2">Til Forbruk
+                                    <InfoTip className="text-indigo-200" text="Lønnen din minus alt du skal overføre videre denne måneden. Et plantall — hva som faktisk står igjen på brukskontoen ser du i Likviditet under." />
+                                </h3>
                                 <p className="text-indigo-200 text-sm">Etter at alle forpliktelser er dekket</p>
                             </div>
                             <Calculator className="w-8 h-8 text-indigo-300 opacity-50" />

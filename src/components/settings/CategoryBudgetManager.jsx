@@ -2,7 +2,16 @@ import { useState } from 'react';
 import { Plus, Trash2, Edit2, Check, X, FolderTree, Tag, BarChart3 } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import ConfirmationModal from '../common/ConfirmationModal';
+import InfoTip from '../common/InfoTip';
 import { SCOPE_LABEL } from '../../utils/categoryMigration';
+
+// «Utenfor statistikk» only touches the Forbruk page (utils: Forbruk.jsx
+// isItemExcludedFromStats) — the budget, the settlement and Min Oversikt
+// still count the post. Typical use: the top-up transfer to Felleskonto,
+// whose purchases already count on their own posts.
+const STATS_TIP = 'Holdes bare utenfor Forbruk-siden (listen, totalene og kakediagrammet), fordi pengene telles der via andre poster — typisk overføringen til Felleskonto, der kjøpene fra kontoen allerede teller. Posten teller fortsatt i budsjettet, i oppgjøret og på Min Oversikt.';
+const STATS_TITLE = (on) => on ? 'Telles ikke på Forbruk-siden — klikk for å inkludere' : 'Hold utenfor statistikk på Forbruk-siden';
+const SCOPE_TIP = 'Hvilke budsjett posten dukker opp i: Felles bare i fellesbudsjettet, Privat bare i private budsjett, Begge i alle. Beløpet settes uansett for hvert budsjett for seg.';
 
 const SCOPES = ['both', 'shared', 'private'];
 const scopeClass = (s) => s === 'both'
@@ -104,10 +113,10 @@ export default function CategoryBudgetManager() {
                                 <>
                                     <span className="font-bold text-gray-900 dark:text-gray-100">
                                         {cat.name}
-                                        {cat.excludeFromStats && <span className="ml-2 text-xs font-medium text-orange-600 dark:text-orange-400">· utenfor statistikk</span>}
+                                        {cat.excludeFromStats && <span className="ml-2 text-xs font-medium text-orange-600 dark:text-orange-400 inline-flex items-center gap-1">· utenfor statistikk <InfoTip text={STATS_TIP} /></span>}
                                     </span>
                                     <div className="flex gap-1">
-                                        <button onClick={() => updateCategory(cat.id, { excludeFromStats: !cat.excludeFromStats })} title={cat.excludeFromStats ? 'Telles ikke i statistikk — klikk for å inkludere' : 'Hold utenfor statistikk'} className={`p-1.5 rounded ${cat.excludeFromStats ? 'text-orange-600 bg-orange-50 dark:bg-orange-900/20' : 'text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20'}`}><BarChart3 className="w-4 h-4" /></button>
+                                        <button onClick={() => updateCategory(cat.id, { excludeFromStats: !cat.excludeFromStats })} title={STATS_TITLE(cat.excludeFromStats)} className={`p-1.5 rounded ${cat.excludeFromStats ? 'text-orange-600 bg-orange-50 dark:bg-orange-900/20' : 'text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20'}`}><BarChart3 className="w-4 h-4" /></button>
                                         <button onClick={() => { setEditingCatId(cat.id); setEditCatName(cat.name); }} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"><Edit2 className="w-4 h-4" /></button>
                                         <button onClick={() => setConfirm({ isOpen: true, kind: 'category', id: cat.id, message: `Slette kategorien «${cat.name}»? Budsjettpostene under den blir uten kategori.` })} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"><Trash2 className="w-4 h-4" /></button>
                                     </div>
@@ -133,10 +142,10 @@ export default function CategoryBudgetManager() {
                                             <span className="text-gray-800 dark:text-gray-200">
                                                 {def.name}
                                                 <span className={`ml-2 text-xs font-medium ${scopeClass(def.scope)}`}>· {SCOPE_LABEL[def.scope]}</span>
-                                                {def.excludeFromStats && <span className="ml-2 text-xs font-medium text-orange-600 dark:text-orange-400">· utenfor statistikk</span>}
+                                                {def.excludeFromStats && <span className="ml-2 text-xs font-medium text-orange-600 dark:text-orange-400 inline-flex items-center gap-1">· utenfor statistikk <InfoTip text={STATS_TIP} /></span>}
                                             </span>
                                             <div className="flex gap-1">
-                                                <button onClick={() => updateBudgetItemDef(def.id, { excludeFromStats: !def.excludeFromStats })} title={def.excludeFromStats ? 'Telles ikke i statistikk — klikk for å inkludere' : 'Hold utenfor statistikk'} className={`p-1.5 rounded ${def.excludeFromStats ? 'text-orange-600 bg-orange-50 dark:bg-orange-900/20' : 'text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20'}`}><BarChart3 className="w-4 h-4" /></button>
+                                                <button onClick={() => updateBudgetItemDef(def.id, { excludeFromStats: !def.excludeFromStats })} title={STATS_TITLE(def.excludeFromStats)} className={`p-1.5 rounded ${def.excludeFromStats ? 'text-orange-600 bg-orange-50 dark:bg-orange-900/20' : 'text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20'}`}><BarChart3 className="w-4 h-4" /></button>
                                                 <button onClick={() => setEditingDef({ id: def.id, name: def.name, scope: def.scope })} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"><Edit2 className="w-4 h-4" /></button>
                                                 <button onClick={() => setConfirm({ isOpen: true, kind: 'def', id: def.id, message: `Slette budsjettposten «${def.name}»? Eksisterende transaksjoner og beløp i budsjettene påvirkes ikke.` })} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"><Trash2 className="w-4 h-4" /></button>
                                             </div>
@@ -161,6 +170,7 @@ export default function CategoryBudgetManager() {
                                 >
                                     {SCOPES.map(s => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
                                 </select>
+                                <InfoTip text={SCOPE_TIP} />
                                 <button onClick={() => handleAddDef(cat.id)} disabled={!defDrafts[cat.id]?.name?.trim()} className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded disabled:opacity-40"><Plus className="w-4 h-4" /></button>
                             </div>
                         </div>

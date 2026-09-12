@@ -3,6 +3,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 import { ArrowRight, Scale, Loader2, PiggyBank, CheckCircle2, AlertTriangle, ArrowLeftRight } from 'lucide-react';
 import { api } from '../../services/firebase';
 import BufferCard from './BufferCard';
+import InfoTip from '../common/InfoTip';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import { reconcileState } from '../../utils/reconciliation';
 import { isExcludedFromSplit, coveredByAccountOf } from '../../utils/settlement';
@@ -160,8 +161,12 @@ export default function Oppgjor() {
                     {sharedBudget && split ? (
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                             <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Fordeling av Fellesutgifter</h3>
-                                <span className="text-sm text-purple-700 dark:text-purple-300 font-medium">{split.splitLabel} · {(split.userShare * 100).toFixed(0)}% / {(split.partnerShare * 100).toFixed(0)}%</span>
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">Fordeling av Fellesutgifter
+                                    <InfoTip text="Det hver av dere skal overføre: egen andel av fellesutgiftene etter fordelingsnøkkelen, minus utlegg dere allerede har lagt ut, pluss eventuell bufferoppbygging — rundet opp etter innstillingen for avrunding. Bare kjøp som er knyttet til en budsjettpost er med." />
+                                </h3>
+                                <span className="text-sm text-purple-700 dark:text-purple-300 font-medium flex items-center gap-1">{split.splitLabel} · {(split.userShare * 100).toFixed(0)}% / {(split.partnerShare * 100).toFixed(0)}%
+                                    <InfoTip text="Fordelingsnøkkelen fra Innstillinger for fellesbudsjettet. «Basert på inntekt» bruker inntektene som er lagt inn der; er ingen registrert, deles det 50/50." />
+                                </span>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-800">
@@ -178,7 +183,9 @@ export default function Oppgjor() {
                                 </div>
                             </div>
                             <div className="flex justify-between items-center text-sm pt-4 mt-4 border-t border-gray-100 dark:border-gray-700">
-                                <span className="text-gray-600 dark:text-gray-400">Faktisk forbruk:</span>
+                                <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Faktisk forbruk:
+                                    <InfoTip text="Summen som faktisk fordeles mellom dere. Uavstemte kjøp og alt som er holdt utenfor fordelingen (på transaksjon, prosjekt eller konto) er ikke med, så tallet kan avvike fra Forbruk-siden." />
+                                </span>
                                 <span className="font-medium dark:text-gray-200">{split.totalActualConsumption.toLocaleString('no-NO', { maximumFractionDigits: 0 })} kr</span>
                             </div>
                         </div>
@@ -290,6 +297,7 @@ export default function Oppgjor() {
                                     className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex-shrink-0">
                                     {savingReconciled ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                                     Marker som avstemt
+                                    <InfoTip className="text-purple-200" text="Merker måneden som ferdig oppgjort. Da vises Likviditet på Min Oversikt som endelig. Ingenting låses — transaksjonene kan fortsatt endres, og du kan angre her." />
                                 </button>
                             </>
                         )}

@@ -1,6 +1,7 @@
 import { useBudget } from '../../contexts/BudgetContext';
 import { useState, useEffect } from 'react';
 import { Users, Save, DollarSign, Calculator, Percent, Coins } from 'lucide-react';
+import InfoTip from '../common/InfoTip';
 
 export default function PartnerSettings() {
     const { activeBudget, updateBudget, currentUser, loading } = useBudget();
@@ -115,6 +116,7 @@ export default function PartnerSettings() {
                         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4 flex items-center">
                             <DollarSign className="w-5 h-5 mr-2 text-gray-500" />
                             Inntekter (Netto Månedlig)
+                            <InfoTip className="ml-2" text="Brukes bare til å regne ut fordelingsnøkkelen når «Etter Inntekt» er valgt under. Står begge på 0, deles det 50/50. Lønnen på Min Oversikt hentes fra transaksjonene, ikke herfra." />
                         </h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
@@ -231,6 +233,7 @@ export default function PartnerSettings() {
                         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4 flex items-center">
                             <Coins className="w-5 h-5 mr-2 text-gray-500" />
                             Avrunding av Overføringer
+                            <InfoTip className="ml-2" text="Beløpene rundes alltid opp til nærmeste valgte trinn, aldri ned. Valget lagres bare i denne nettleseren, så partneren kan se andre beløp på sin enhet. Home Assistant-feeden bruker 100 kr." />
                         </h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
                             Rund opp beløpene hver av dere skal overføre til nærmeste valgte beløp.
@@ -270,7 +273,9 @@ export default function PartnerSettings() {
                                 className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 dark:bg-gray-700 dark:border-gray-600"
                             />
                             <div>
-                                <span className="font-medium text-gray-900 dark:text-white">Passiv Partner</span>
+                                <span className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5">Passiv Partner
+                                    <InfoTip text="Ren merkelapp i dag — påvirker ingen beregninger. Alle tall for partneren legges inn her uansett." />
+                                </span>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">Partneren bruker ikke appen selv. Du legger inn tallene.</p>
                             </div>
                         </label>

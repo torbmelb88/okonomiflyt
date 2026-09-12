@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { PiggyBank, TrendingUp, Loader2, Users, Wallet } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
+import InfoTip from '../common/InfoTip';
 
 const datesClose = (d1, d2, tol = 4) => Math.ceil(Math.abs(new Date(d2) - new Date(d1)) / 86400000) <= tol;
 
@@ -90,11 +91,15 @@ export default function Sparing() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                    <div className="text-sm text-gray-500 dark:text-gray-400">Total sparesaldo</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1">Total sparesaldo
+                        <InfoTip text="Saldo hentet fra banken for alle sparekontoer, uansett hvilket budsjett som er aktivt. Kontoer som ikke er koblet til SpareBank 1 vises som «—» og teller ikke med." />
+                    </div>
                     <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{Math.round(totalBalance).toLocaleString('no-NO')} kr</div>
                 </div>
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                    <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1"><TrendingUp className="w-4 h-4" /> Innskutt (registrerte bidrag)</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1"><TrendingUp className="w-4 h-4" /> Innskutt (registrerte bidrag)
+                        <InfoTip text="Bare overføringer appen klarte å pare: en innbetaling på sparekontoen med et likt uttak fra en annen konto innen fire dager. Renter og innskudd uten motpost telles ikke." />
+                    </div>
                     <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{Math.round(totalContributed).toLocaleString('no-NO')} kr</div>
                 </div>
             </div>

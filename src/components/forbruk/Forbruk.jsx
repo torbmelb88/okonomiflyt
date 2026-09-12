@@ -5,6 +5,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recha
 import { Users, DollarSign, ArrowRight, List } from 'lucide-react';
 import clsx from 'clsx';
 import BudgetItemDetailsModal from '../budget/BudgetItemDetailsModal';
+import InfoTip from '../common/InfoTip';
 
 /**
  * Forbruk = spending statistics: the budget-vs-actual comparison and the
@@ -108,7 +109,9 @@ export default function Forbruk() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                        <h3 className="font-bold text-gray-900 dark:text-gray-100">Budsjett vs Faktisk</h3>
+                        <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">Budsjett vs Faktisk
+                            <InfoTip text="Bare forbruk som er knyttet til en budsjettpost er med — uavstemte transaksjoner mangler her til de er avstemt. Returer trekkes fra. Poster merket «utenfor statistikk» i Innstillinger vises ikke, siden pengene telles via andre poster." />
+                        </h3>
                         <span className="text-sm text-gray-500 dark:text-gray-400">
                             {Math.round(totalActual).toLocaleString('no-NO')} / {Math.round(totalBudgeted).toLocaleString('no-NO')} kr
                         </span>
@@ -140,7 +143,9 @@ export default function Forbruk() {
                 </div>
 
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Faktisk forbruk</h3>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">Faktisk forbruk
+                        <InfoTip text="Gruppert etter budsjettpostens kategori, ikke transaksjonens. Poster med netto null eller negativt forbruk (mer refundert enn brukt) vises ikke." />
+                    </h3>
                     <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>

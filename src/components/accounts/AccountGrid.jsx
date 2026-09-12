@@ -32,7 +32,7 @@ export default function AccountGrid({ accounts, onAdd, onEdit, onDelete, addLabe
                                 <div className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100">
                                     {bal.balance.toLocaleString('no-NO')} {bal.currency || 'kr'}
                                     {typeof bal.availableBalance === 'number' && bal.availableBalance !== bal.balance && (
-                                        <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">Disponibelt: {bal.availableBalance.toLocaleString('no-NO')}</span>
+                                        <span className="block text-xs font-normal text-gray-500 dark:text-gray-400" title="Bankens disponible beløp — bokført saldo minus reserverte kortkjøp som ennå ikke er trukket">Disponibelt: {bal.availableBalance.toLocaleString('no-NO')}</span>
                                     )}
                                 </div>
                             ) : null;
@@ -43,7 +43,7 @@ export default function AccountGrid({ accounts, onAdd, onEdit, onDelete, addLabe
                             const short = bal == null ? null : Math.max(0, Math.ceil(account.bufferTarget - bal));
                             const ok = short === 0;
                             return (
-                                <div className={`mt-1 flex items-center gap-1 text-xs ${ok ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                <div className={`mt-1 flex items-center gap-1 text-xs ${ok ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`} title="Ønsket buffer sammenlignet med dagens banksaldo. Historikk og oppbyggingsplan finner du på Oppgjør (felles) eller Min Oversikt (privat).">
                                     <PiggyBank className="w-3 h-3" />
                                     <span>
                                         Buffer {account.bufferTarget.toLocaleString('no-NO')} kr

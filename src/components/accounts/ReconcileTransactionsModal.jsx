@@ -646,13 +646,13 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
 
                         <div className="flex gap-3">
                             <button onClick={handleMarkAsSalary} className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-50 hover:bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-300 rounded-xl transition-colors font-medium text-sm"><span>💰</span>Lønn
-                                <InfoTip text="Merker inntekten som lønn. Summeres som netto lønn i Min Oversikt og er utgangspunktet for «igjen å bruke»." />
+                                <InfoTip text="Merker inntekten som lønn. Summeres som netto lønn i Min Oversikt og er utgangspunktet for «Til Forbruk» / «Disponibelt». Erstatter et eventuelt foreløpig lønnsbeløp for måneden." />
                             </button>
                             <button onClick={handleMarkAsInternalTransfer} className="flex-1 flex items-center justify-center gap-2 py-3 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded-xl transition-colors font-medium text-sm"><span>🔄</span>Intern overføring
-                                <InfoTip text="Flytting av penger mellom egne kontoer. Holdes utenfor alle summer og beregninger." />
+                                <InfoTip text="Flytting av penger mellom egne kontoer. Holdes utenfor forbruk, oppgjør og overføringsberegningene i Min Oversikt. Innbetalinger på en sparekonto kan fortsatt telle som sparebidrag på Sparing-siden når de matcher et uttak fra en annen konto." />
                             </button>
                             <button onClick={handleMarkAsSavings} className="flex-1 flex items-center justify-center gap-2 py-3 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded-xl transition-colors font-medium text-sm"><span>🐷</span>Sparing
-                                <InfoTip text="Overføring til sparing. Holdes utenfor forbruk, men vises som «Overført til sparing» i Min Oversikt og trekkes fra i «igjen å bruke». Bruk den på det utgående beløpet." />
+                                <InfoTip text="Overføring til sparing. Holdes utenfor forbruk, men vises som «Overført til sparing» i Min Oversikt og trekkes fra i «Disponibelt». Bruk den på det utgående beløpet — og den erstatter et eventuelt foreløpig sparebeløp for måneden." />
                             </button>
                         </div>
 
