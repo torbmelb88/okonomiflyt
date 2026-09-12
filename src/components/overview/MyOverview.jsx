@@ -3,21 +3,22 @@ import { useBudget } from '../../contexts/BudgetContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/firebase';
 import { ArrowRight, Wallet, CreditCard, PiggyBank, Calculator, Info, Landmark, Pencil, Check, X } from 'lucide-react';
-import { resolveSalary, SALARY_SOURCE_LABEL } from '../../utils/salary';
+import { resolveSalary, resolveSavings, parseAmount2, SALARY_SOURCE_LABEL, SAVINGS_SOURCE_LABEL } from '../../utils/provisional';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import UnnecessaryPurchasesCard from './UnnecessaryPurchasesCard';
 import LiquidityCard from './LiquidityCard';
 import BufferCard from '../oppgjor/BufferCard';
 import { refundStatus } from '../../utils/refunds';
-import { coveringIncomeIds, isCoverNeutral, isCoveredExpense } from '../../utils/coverage';
+import { coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
 import { isExcludedFromSplit, heldOutOfTransfer, coveredByAccountOf } from '../../utils/settlement';
 
 export default function MyOverview() {
     const { activeBudget, budgets, transactions, accounts, allProjects, isMonthReconciled, updateBudget } = useBudget();
-    // Provisional salary for the shown month (utils/salary.js)
-    const [editingSalary, setEditingSalary] = useState(false);
-    const [salaryInput, setSalaryInput] = useState('');
-    const [savingSalary, setSavingSalary] = useState(false);
+    // Provisional salary / savings for the shown month (utils/provisional.js):
+    // which line is being edited ('salary' | 'savings' | null) and its input.
+    const [editing, setEditing] = useState(null);
+    const [editInput, setEditInput] = useState('');
+    const [savingEstimate, setSavingEstimate] = useState(false);
     const { currentUser } = useAuth();
 
     // Month Selection (Default to current)
@@ -52,28 +53,53 @@ export default function MyOverview() {
     // --- CALCULATIONS ---
 
     // 0. Salary: the month's «Lønn» rows, else a provisional amount typed in
-    // for the month, else the budget's expected salary (utils/salary.js).
+    // for the month, else the budget's expected salary (utils/provisional.js).
+    const NONE = { amount: 0, source: 'none', actual: 0, estimate: null, defaultAmount: null };
     const salary = useMemo(() => {
-        if (!activeBudget || activeBudget.type !== 'personal') return { amount: 0, source: 'none', actual: 0, estimate: null, defaultAmount: null };
+        if (!activeBudget || activeBudget.type !== 'personal') return NONE;
         return resolveSalary({ budget: activeBudget, transactions, month: selectedMonth });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [transactions, selectedMonth, activeBudget]);
     const netSalary = salary.amount;
 
-    const saveSalaryEstimate = async (value) => {
-        const n = Math.round((parseFloat(String(value ?? '').replace(',', '.')) || 0) * 100) / 100;
-        setSavingSalary(true);
+    // Per-month estimate for salary or savings; 0 removes it.
+    const saveEstimate = async (kind, value) => {
+        const field = kind === 'salary' ? 'salaryEstimates' : 'savingsEstimates';
+        const n = parseAmount2(value);
+        setSavingEstimate(true);
         try {
-            const estimates = { ...(activeBudget.salaryEstimates || {}) };
+            const estimates = { ...(activeBudget[field] || {}) };
             if (n > 0) estimates[selectedMonth] = n; else delete estimates[selectedMonth];
-            await updateBudget(activeBudget.id, { salaryEstimates: estimates });
-            setEditingSalary(false);
+            await updateBudget(activeBudget.id, { [field]: estimates });
+            setEditing(null);
         } catch (err) {
-            console.error('Could not save salary estimate', err);
+            console.error('Could not save estimate', err);
             alert('Kunne ikke lagre beløpet.');
         } finally {
-            setSavingSalary(false);
+            setSavingEstimate(false);
         }
     };
+    const startEditing = (kind, current) => { setEditInput(current != null ? String(current) : ''); setEditing(kind); };
+    // Inline editor shared by the salary and savings cards (a render helper,
+    // not a component, so the input keeps focus while typing)
+    const renderEstimateEditor = (kind, placeholder) => (
+        <form onSubmit={(e) => { e.preventDefault(); saveEstimate(kind, editInput); }} className="flex items-center gap-2">
+            <input
+                type="number" inputMode="decimal" min="0" step="0.01" autoFocus
+                value={editInput}
+                onChange={(e) => setEditInput(e.target.value)}
+                placeholder={placeholder}
+                className="w-40 px-3 py-2 text-right border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-green-500 outline-none"
+            />
+            <button type="submit" disabled={savingEstimate} title="Lagre" className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg disabled:opacity-50"><Check className="w-4 h-4" /></button>
+            <button type="button" onClick={() => setEditing(null)} title="Avbryt" className="p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X className="w-4 h-4" /></button>
+        </form>
+    );
+    const sourceBadge = (source) => source === 'estimate'
+        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider">Foreløpig</span>
+        : source === 'default'
+            ? <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-bold uppercase tracking-wider">Anslag</span>
+            : null;
 
     // 1. Joint Budget Share (ACTUALS from Prev Month)
     const prevMonthStr = getPreviousMonth(selectedMonth);
@@ -201,17 +227,16 @@ export default function MyOverview() {
 
     const totalToJointAccount = sharedShareAmount + creditCardUsage + bufferContribution;
 
-    // 3. Savings — actual transactions marked «Sparing» this month. Only the
-    // outgoing transfer leg (expense) counts; incoming legs on the savings
-    // account are ignored so a pair never nets to zero or double-counts.
-    const savingsAmount = useMemo(() => {
-        if (!activeBudget || activeBudget.type !== 'personal') return 0;
-        if (!Array.isArray(transactions)) return 0;
-        return transactions
-            .filter(t => t.month === selectedMonth && t.type === 'expense' && !isCoveredExpense(t) &&
-                (t.category || '').trim().toLowerCase() === 'sparing')
-            .reduce((sum, t) => sum + t.amount, 0);
+    // 3. Savings — transactions marked «Sparing» this month (only the outgoing
+    // leg; incoming legs on the savings account are ignored so a pair never
+    // nets to zero or double-counts), else the provisional/expected fixed
+    // savings so liquidity isn't overstated before the transfer has left.
+    const savings = useMemo(() => {
+        if (!activeBudget || activeBudget.type !== 'personal') return NONE;
+        return resolveSavings({ budget: activeBudget, transactions, month: selectedMonth });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [transactions, selectedMonth, activeBudget]);
+    const savingsAmount = savings.amount;
 
     // 4. Bill account top-up — last month's ACTUAL consumption from accounts
     // flagged as regningskonto (money movement excluded), which is the amount
@@ -336,12 +361,7 @@ export default function MyOverview() {
                                 className="w-4 h-4 text-gray-400 cursor-help"
                                 title="Transaksjoner merket «Lønn» vinner alltid. Til de kommer kan du legge inn beløpet fra lønnsslippen for denne måneden, eller la anslaget fra Innstillinger gjelde."
                             />
-                            {salary.source === 'estimate' && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider">Foreløpig</span>
-                            )}
-                            {salary.source === 'default' && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-bold uppercase tracking-wider">Anslag</span>
-                            )}
+                            {sourceBadge(salary.source)}
                         </div>
                         <p className="text-sm text-gray-500 dark:text-gray-400">{SALARY_SOURCE_LABEL[salary.source]}</p>
                         {salary.source === 'actual' && salary.estimate != null && Math.abs(salary.estimate - salary.actual) >= 1 && (
@@ -351,30 +371,18 @@ export default function MyOverview() {
                         )}
                     </div>
                     <div className="text-right flex-shrink-0">
-                        {editingSalary ? (
-                            <form onSubmit={(e) => { e.preventDefault(); saveSalaryEstimate(salaryInput); }} className="flex items-center gap-2">
-                                <input
-                                    type="number" inputMode="decimal" min="0" step="0.01" autoFocus
-                                    value={salaryInput}
-                                    onChange={(e) => setSalaryInput(e.target.value)}
-                                    placeholder="Beløp fra lønnsslippen"
-                                    className="w-40 px-3 py-2 text-right border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-green-500 outline-none"
-                                />
-                                <button type="submit" disabled={savingSalary} title="Lagre" className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg disabled:opacity-50"><Check className="w-4 h-4" /></button>
-                                <button type="button" onClick={() => setEditingSalary(false)} title="Avbryt" className="p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X className="w-4 h-4" /></button>
-                            </form>
-                        ) : (
+                        {editing === 'salary' ? renderEstimateEditor('salary', 'Beløp fra lønnsslippen') : (
                             <div className="flex items-center justify-end gap-2">
                                 <span className={`text-3xl font-bold ${salary.source === 'actual' ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300'}`}>{netSalary.toLocaleString('no-NO')} kr</span>
                                 {salary.source !== 'actual' && (
-                                    <button onClick={() => { setSalaryInput(salary.estimate != null ? String(salary.estimate) : ''); setEditingSalary(true); }} title="Legg inn beløpet fra lønnsslippen for denne måneden" className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg">
+                                    <button onClick={() => startEditing('salary', salary.estimate)} title="Legg inn beløpet fra lønnsslippen for denne måneden" className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg">
                                         <Pencil className="w-4 h-4" />
                                     </button>
                                 )}
                             </div>
                         )}
-                        {!editingSalary && salary.source === 'estimate' && (
-                            <button onClick={() => saveSalaryEstimate(0)} disabled={savingSalary} className="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400 mt-1">Fjern foreløpig beløp</button>
+                        {editing !== 'salary' && salary.source === 'estimate' && (
+                            <button onClick={() => saveEstimate('salary', 0)} disabled={savingEstimate} className="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400 mt-1">Fjern foreløpig beløp</button>
                         )}
                     </div>
                 </div>
@@ -481,15 +489,43 @@ export default function MyOverview() {
                                 <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl mr-4">
                                     <PiggyBank className="w-6 h-6 text-green-600 dark:text-green-400" />
                                 </div>
-                                <div>
-                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">Til Sparing</h3>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Transaksjoner merket «Sparing» i {formatMonth(selectedMonth)}</p>
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Til Sparing</h3>
+                                        {sourceBadge(savings.source)}
+                                    </div>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">{SAVINGS_SOURCE_LABEL[savings.source]} · {formatMonth(selectedMonth)}</p>
                                 </div>
                             </div>
 
-                            <div className="flex justify-between items-end mt-8">
+                            {savings.source === 'actual' && savings.estimate != null && Math.abs(savings.estimate - savings.actual) >= 1 && (
+                                <p className="text-xs text-amber-700 dark:text-amber-300 mb-2">
+                                    Foreløpig beløp var {savings.estimate.toLocaleString('no-NO')} kr — faktisk overført {savings.actual.toLocaleString('no-NO')} kr.
+                                </p>
+                            )}
+                            {savings.source === 'actual' && savings.estimate == null && savings.defaultAmount != null && savings.actual < savings.defaultAmount - 0.5 && (
+                                <p className="text-xs text-amber-700 dark:text-amber-300 mb-2">
+                                    Fast sparing er {savings.defaultAmount.toLocaleString('no-NO')} kr — hittil overført {savings.actual.toLocaleString('no-NO')} kr.
+                                </p>
+                            )}
+
+                            <div className="flex justify-between items-end mt-8 gap-3">
                                 <span className="text-sm font-medium text-green-600 dark:text-green-400">Overført til sparing</span>
-                                <span className="text-3xl font-bold text-gray-900 dark:text-white">{savingsAmount.toLocaleString('no-NO')} kr</span>
+                                <div className="text-right">
+                                    {editing === 'savings' ? renderEstimateEditor('savings', 'Forventet sparebeløp') : (
+                                        <div className="flex items-center justify-end gap-2">
+                                            <span className={`text-3xl font-bold ${savings.source === 'actual' ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300'}`}>{savingsAmount.toLocaleString('no-NO')} kr</span>
+                                            {savings.source !== 'actual' && (
+                                                <button onClick={() => startEditing('savings', savings.estimate)} title="Legg inn forventet sparebeløp for denne måneden" className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg">
+                                                    <Pencil className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                    {editing !== 'savings' && savings.source === 'estimate' && (
+                                        <button onClick={() => saveEstimate('savings', 0)} disabled={savingEstimate} className="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400 mt-1">Fjern foreløpig beløp</button>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>

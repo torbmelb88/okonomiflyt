@@ -55,6 +55,7 @@ export function createDemoDb() {
             members: [{ uid: demoUser.uid, role: 'owner', name: 'Demo', income: 35000 }],
             // Fallback salary on Min Oversikt until the month's «Lønn» row arrives
             expectedSalary: 35000,
+            expectedSavings: 3000,
         },
         {
             id: 'budget-shared',
