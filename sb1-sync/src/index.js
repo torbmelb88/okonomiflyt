@@ -4,7 +4,7 @@ import path from 'node:path';
 import cron from 'node-cron';
 import { getAccessToken } from './auth.js';
 import { fetchAccounts, fetchTransactions, fetchClassifiedTransactions } from './sb1.js';
-import { normalizeTransaction, normalizeAccount } from './normalize.js';
+import { normalizeTransactions, normalizeAccount } from './normalize.js';
 import { initFirestore, upsertTransactions, upsertAccounts, pruneStaleTransactions, upsertBalanceSnapshots } from './firestore.js';
 
 const config = {
@@ -80,7 +80,7 @@ async function runOnce() {
   }
   if (labelled) console.log(`Merket ${labelled} interne overføringer med motkonto.`);
 
-  const all = rawTxs.map(normalizeTransaction);
+  const all = normalizeTransactions(rawTxs);
 
   // File sink (kept for inspection/debugging)
   if (config.sink === 'file' || config.sink === 'both') {
@@ -122,11 +122,16 @@ async function runOnce() {
 
 async function main() {
   if (config.schedule) {
-    console.log(`Scheduler-modus: "${config.schedule}" (Europe/Oslo). Kjører én gang nå, så på timeplan.`);
+    // Flere cron-uttrykk skilles med semikolon (node-cron tar ett om gangen),
+    // f.eks. "0 6,12,20 * * *;30 0 * * *" for hel time + 00:30.
+    const schedules = config.schedule.split(';').map((s) => s.trim()).filter(Boolean);
+    console.log(`Scheduler-modus: ${schedules.map((s) => `"${s}"`).join(' + ')} (Europe/Oslo). Kjører én gang nå, så på timeplan.`);
     await runOnce().catch((e) => console.error('Første kjøring feilet:', e));
-    cron.schedule(config.schedule, () => {
-      runOnce().catch((e) => console.error('Planlagt kjøring feilet:', e));
-    }, { timezone: 'Europe/Oslo' });
+    for (const expr of schedules) {
+      cron.schedule(expr, () => {
+        runOnce().catch((e) => console.error('Planlagt kjøring feilet:', e));
+      }, { timezone: 'Europe/Oslo' });
+    }
   } else {
     await runOnce();
   }

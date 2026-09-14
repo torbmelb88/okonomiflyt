@@ -39,7 +39,7 @@ avslått i mer enn 30 dager, må du gjøre BankID på nytt (steg 1).
    ```bash
    docker compose up -d --build
    ```
-   `docker-compose.yml` setter `SB1_SCHEDULE=0 6 * * *` (daglig 06:00 norsk tid)
+   `docker-compose.yml` setter `SB1_SCHEDULE=0 6,12,20 * * *;30 0 * * *` (06, 12, 20 og 00:30 norsk tid)
    og monterer `./data` som volum slik at den roterende token-en overlever
    restart. **Dette volumet er kritisk** — mister du `token.json`, må du
    bootstrappe på nytt.
@@ -55,7 +55,7 @@ avslått i mer enn 30 dager, må du gjøre BankID på nytt (steg 1).
 | `SB1_OUT_DIR` | `./data` | Hvor `transactions.json` skrives |
 | `SB1_LOOKBACK_DAYS` | `90` | Antall dager bakover per synk |
 | `SB1_USE_CLASSIFIED` | `false` | Bruk `/classified` for bankens kategorier |
-| `SB1_SCHEDULE` | _(tom)_ | Cron (Europe/Oslo). Tom = kjør én gang og avslutt |
+| `SB1_SCHEDULE` | _(tom)_ | Cron (Europe/Oslo). Flere uttrykk skilles med `;`. Tom = kjør én gang og avslutt |
 
 ## Normalisert form
 

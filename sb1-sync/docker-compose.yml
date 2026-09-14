@@ -5,9 +5,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Tre ganger daglig (06, 12 og 20 norsk tid). Containeren blir værende og
-      # kjører på timeplan.
-      SB1_SCHEDULE: "0 6,12,20 * * *"
+      # Fire ganger daglig (06, 12, 20 og 00:30 norsk tid). Flere cron-uttrykk
+      # skilles med semikolon. Containeren blir værende og kjører på timeplan.
+      SB1_SCHEDULE: "0 6,12,20 * * *;30 0 * * *"
       # Skriv til Firestore (mellomlagrings-collection). Krever at sa-key.json
       # ligger i ./data-volumet.
       SB1_SINK: "firestore"
