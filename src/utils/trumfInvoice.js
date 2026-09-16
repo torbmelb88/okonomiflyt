@@ -8,6 +8,10 @@
 // Layout (page 2, "Transaksjonsoversikt"):
 //   Bokf. dato  Kjøpsdato  Spesifikasjon  Kurs  Valuta  Beløp  Beløp i NOK
 //   14.08.26    14.08.26   TrumfPay, KIWI 204 Skreia, 2026-08-14 18.43.23  NOK  -600,30  -600,30
+// Payments of the previous invoice sit in a separate, narrower table above
+// the purchases, with a single amount column and no Kurs/Valuta/Beløp:
+//   Bokf. dato  Kjøpsdato  Spesifikasjon  Beløp i NOK
+//   31.08.26    30.08.26   Innbetaling    4.761,33
 // Purchases are negative, refunds/payments positive.
 
 const DATE_RE = /^(\d{2})\.(\d{2})\.(\d{2,4})$/;
@@ -33,16 +37,33 @@ export const parseNorwegianAmount = (str) => {
 const cells = (line) => line.split(/\t|\s{2,}/).map(c => c.trim()).filter(Boolean);
 
 // A transaction row: two dates first, then spec, [kurs], currency, amount, NOK amount.
+// The short form (payments table) is: two dates, spec, NOK amount.
 const parseTransactionLine = (line) => {
     const c = cells(line);
-    if (c.length < 5) return null;
+    if (c.length < 4) return null;
     const booked = parseNorwegianDate(c[0]);
     const purchased = parseNorwegianDate(c[1]);
     if (!booked || !purchased) return null;
 
     const nokStr = c[c.length - 1];
+    if (!AMOUNT_RE.test(nokStr)) return null;
+
     const amountStr = c[c.length - 2];
-    if (!AMOUNT_RE.test(nokStr) || !AMOUNT_RE.test(amountStr)) return null;
+    if (!AMOUNT_RE.test(amountStr)) {
+        // Short form: everything between the dates and the amount is the spec.
+        const spec = c.slice(2, c.length - 1).join(' ').trim();
+        if (!spec) return null;
+        const amountNok = parseNorwegianAmount(nokStr);
+        return {
+            bookedDate: booked,
+            date: purchased,
+            spec,
+            currency: 'NOK',
+            rate: null,
+            amountOriginal: amountNok,
+            amountNok,
+        };
+    }
 
     let idx = c.length - 3;
     let currency = null;
@@ -154,8 +175,10 @@ export const parseTrumfInvoice = (lines) => {
         const sum = rows.reduce((s, r) => s + r.amountNok, 0);
         const expected = newBalance - previousBalance;
         if (Math.abs(sum - expected) > 0.011) {
+            const missing = expected - sum;
             warnings.push(
-                `Summen av transaksjonene (${sum.toFixed(2)}) stemmer ikke med endringen i skyldig beløp (${expected.toFixed(2)}) — noen linjer kan mangle.`
+                `Linjene på fakturaen summerer til ${sum.toFixed(2)}, men skyldig beløp gikk fra ${previousBalance.toFixed(2)} til ${newBalance.toFixed(2)} (endring ${expected.toFixed(2)}). ` +
+                `Det mangler ${missing.toFixed(2)} — fakturaen har trolig en linje (f.eks. innbetaling eller refusjon) som ikke ble lest.`
             );
         }
     }
