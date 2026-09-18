@@ -322,6 +322,22 @@ export function BudgetProvider({ children }) {
         }
     };
 
+    // A receipt outlives its transaction: when the transaction is deleted the
+    // receipt goes back to unmatched so it can be linked to another one (e.g.
+    // the purchase was booked on the wrong card and paid some other way).
+    const releaseReceiptsOf = async (transactionIds) => {
+        const linked = receipts.filter(r => transactionIds.includes(r.transactionId));
+        if (linked.length === 0) return;
+        const patch = { transactionId: null, status: 'unmatched' };
+        try {
+            await Promise.all(linked.map(r => api.updateDocument('receipts', r.id, patch)));
+            setReceipts(prev => prev.map(r => linked.some(l => l.id === r.id) ? { ...r, ...patch } : r));
+        } catch (error) {
+            // The deletion itself succeeded — the receipt can still be released manually
+            console.warn("Could not release receipts of deleted transactions", error);
+        }
+    };
+
     const deleteTransaction = async (id) => {
         if (!activeBudgetId) return;
         try {
@@ -334,6 +350,7 @@ export function BudgetProvider({ children }) {
             const strip = (t) => ({ coveredByTransactionIds: coverLinkIds(t).filter(x => x !== id) });
             await Promise.all(covered.map(t => api.updateDocument('transactions', t.id, strip(t))));
             await api.deleteDocument('transactions', id);
+            await releaseReceiptsOf([id]);
             setTransactions(prev => prev
                 .filter(t => t.id !== id && t.refundParentId !== id)
                 .map(t => coverLinkIds(t).includes(id) ? { ...t, ...strip(t) } : t));
@@ -347,6 +364,7 @@ export function BudgetProvider({ children }) {
         if (!activeBudgetId || !ids || ids.length === 0) return;
         try {
             await Promise.all(ids.map(id => api.deleteDocument('transactions', id)));
+            await releaseReceiptsOf(ids);
             setTransactions(prev => prev.filter(t => !ids.includes(t.id)));
         } catch (error) {
             console.error("Error deleting transactions:", error);
@@ -689,6 +707,31 @@ export function BudgetProvider({ children }) {
             ));
         } catch (error) {
             console.error("Error linking receipt to transaction:", error);
+            throw error;
+        }
+    };
+
+    // Releases a receipt from its transaction so it can be linked to another
+    // one. Also the way out when the transaction no longer exists.
+    const unlinkReceipt = async (receipt) => {
+        try {
+            const patch = { transactionId: null, status: 'unmatched' };
+            await api.updateDocument('receipts', receipt.id, patch);
+            if (receipt.transactionId) {
+                try {
+                    await api.updateDocument('transactions', receipt.transactionId, { receiptId: null });
+                } catch (error) {
+                    // The transaction may have been deleted — the receipt is released either way
+                    console.warn("Could not clear receiptId on transaction", error);
+                }
+            }
+            setReceipts(prev => prev.map(r => r.id === receipt.id ? { ...r, ...patch } : r));
+            setTransactions(prev => prev.map(t => t.id === receipt.transactionId
+                ? { ...t, receiptId: null }
+                : t
+            ));
+        } catch (error) {
+            console.error("Error unlinking receipt:", error);
             throw error;
         }
     };
@@ -1133,7 +1176,8 @@ export function BudgetProvider({ children }) {
         getReceiptItems,
         getAllReceiptItems,
         deleteReceipt,
-        linkReceiptToTransaction
+        linkReceiptToTransaction,
+        unlinkReceipt
         // The action functions are intentionally left out of the deps: they are
         // recreated each render, but all state they close over is listed below,
         // so the memoized value always exposes up-to-date functions.

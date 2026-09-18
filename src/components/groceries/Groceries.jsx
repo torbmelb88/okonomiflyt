@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
     ShoppingBasket, ReceiptText, Trash2, ChevronDown, ChevronUp,
-    Link2, TicketPercent, Recycle, TrendingUp, TrendingDown, Minus
+    Link2, Unlink, TicketPercent, Recycle, TrendingUp, TrendingDown, Minus
 } from 'lucide-react';
 import {
     ResponsiveContainer, LineChart, Line,
@@ -19,7 +19,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export default function Groceries() {
     const {
         receipts, allReceiptItems, getAllReceiptItems,
-        deleteReceipt, linkReceiptToTransaction, transactions
+        deleteReceipt, linkReceiptToTransaction, unlinkReceipt, transactions
     } = useBudget();
 
     const { theme } = useTheme();
@@ -312,6 +312,7 @@ export default function Groceries() {
                                 onDelete={() => setDeleteTarget(receipt)}
                                 candidates={receipt.transactionId ? [] : candidatesFor(receipt)}
                                 onLink={(transaction) => linkReceiptToTransaction(receipt.id, transaction)}
+                                onUnlink={() => unlinkReceipt(receipt)}
                             />
                         ))}
                     </div>
@@ -452,7 +453,7 @@ function EmptyHint({ text }) {
     return <p className="text-sm text-gray-400 dark:text-gray-500 italic">{text}</p>;
 }
 
-function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, onLink }) {
+function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, onLink, onUnlink }) {
     const [linking, setLinking] = useState(false);
     const isMatched = !!receipt.transactionId;
 
@@ -462,6 +463,17 @@ function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, 
             await onLink(transaction);
         } catch {
             alert("Kunne ikke koble kvitteringen.");
+        } finally {
+            setLinking(false);
+        }
+    };
+
+    const handleUnlink = async () => {
+        setLinking(true);
+        try {
+            await onUnlink();
+        } catch {
+            alert("Kunne ikke løse kvitteringen fra transaksjonen.");
         } finally {
             setLinking(false);
         }
@@ -496,6 +508,16 @@ function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, 
                         ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
                 </button>
+                {isMatched && (
+                    <button
+                        onClick={handleUnlink}
+                        disabled={linking}
+                        className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors flex-shrink-0 disabled:opacity-50"
+                        title="Løs fra transaksjonen — kvitteringen blir umatchet og kan kobles til en annen"
+                    >
+                        <Unlink className="w-4 h-4" />
+                    </button>
+                )}
                 <button
                     onClick={onDelete}
                     className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors flex-shrink-0"
