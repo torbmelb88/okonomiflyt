@@ -16,12 +16,15 @@ function withinDays(dateA, dateB, days) {
 /**
  * Shows the receipt (with line items) linked to a transaction, or — when an
  * unmatched receipt has the same total and a nearby date — offers to link it.
+ * With neither, any unmatched receipt can be picked by hand (e.g. a purchase
+ * reimbursed by a rounded transfer days later).
  */
 export default function TransactionReceipt({ transaction }) {
     const { receipts, getReceiptItems, linkReceiptToTransaction } = useBudget();
     const [expanded, setExpanded] = useState(false);
     const [items, setItems] = useState(null);
     const [linking, setLinking] = useState(false);
+    const [picking, setPicking] = useState(false);
 
     const matched = receipts.find(r =>
         r.transactionId === transaction.id || r.id === transaction.receiptId
@@ -32,12 +35,21 @@ export default function TransactionReceipt({ transaction }) {
         withinDays(r.date, transaction.date, 3)
     ) : null;
     const receipt = matched || suggestion;
+    // Closest in date first — the amount is allowed to differ here
+    const manualOptions = !receipt && transaction.type !== 'income'
+        ? receipts
+            .filter(r => !r.transactionId)
+            .sort((a, b) => Math.abs(new Date(a.date) - new Date(transaction.date))
+                - Math.abs(new Date(b.date) - new Date(transaction.date)))
+            .slice(0, 8)
+        : [];
 
     // Collapse and drop loaded items when we switch receipt
     useEffect(() => {
         setExpanded(false);
         setItems(null);
-    }, [receipt?.id]);
+        setPicking(false);
+    }, [receipt?.id, transaction.id]);
 
     useEffect(() => {
         if (!expanded || !receipt || items !== null) return;
@@ -49,18 +61,54 @@ export default function TransactionReceipt({ transaction }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [expanded, receipt?.id, items]);
 
-    if (!receipt) return null;
-
-    const handleLink = async () => {
+    const handleLink = async (target = receipt) => {
         setLinking(true);
         try {
-            await linkReceiptToTransaction(receipt.id, transaction);
+            await linkReceiptToTransaction(target.id, transaction);
         } catch {
             alert("Kunne ikke koble kvitteringen.");
         } finally {
             setLinking(false);
         }
     };
+
+    if (!receipt) {
+        if (manualOptions.length === 0) return null;
+        return (
+            <div className="mb-6">
+                <button
+                    onClick={() => setPicking(!picking)}
+                    className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-300"
+                >
+                    <Link2 className="w-3.5 h-3.5" />
+                    Koble til en umatchet kvittering manuelt
+                    {picking ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+                {picking && (
+                    <ul className="mt-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 divide-y divide-amber-200/60 dark:divide-amber-800/60">
+                        {manualOptions.map(r => (
+                            <li key={r.id}>
+                                <button
+                                    onClick={() => handleLink(r)}
+                                    disabled={linking}
+                                    className="w-full px-4 py-2 flex items-center gap-3 text-left text-sm hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
+                                >
+                                    <ReceiptText className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                                    <span className="flex-1 min-w-0 truncate text-gray-900 dark:text-gray-100">
+                                        {r.store}
+                                        <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{r.date}</span>
+                                    </span>
+                                    <span className="tabular-nums text-gray-700 dark:text-gray-300 flex-shrink-0">
+                                        {r.total.toLocaleString('no-NO', { minimumFractionDigits: 2 })} kr
+                                    </span>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        );
+    }
 
     const isSuggestion = !matched;
 
@@ -96,7 +144,7 @@ export default function TransactionReceipt({ transaction }) {
             {isSuggestion && (
                 <div className="px-4 pb-3">
                     <button
-                        onClick={handleLink}
+                        onClick={() => handleLink()}
                         disabled={linking}
                         className="w-full flex items-center justify-center gap-2 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-300 disabled:dark:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
                     >
