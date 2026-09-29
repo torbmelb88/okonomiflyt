@@ -81,7 +81,11 @@ export default function Oppgjor() {
         <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-800">
             <div className="text-sm text-gray-600 dark:text-gray-400">{title} ({(share * 100).toFixed(0)}%)</div>
             <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{fmt(amount)} kr</div>
-            {utlegg > 0 && <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">Inkl. {utleggLabel} −{fmt(utlegg)} kr</div>}
+            {Math.abs(utlegg) >= 0.5 && (
+                <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                    {utlegg > 0 ? `Inkl. ${utleggLabel} −${fmt(utlegg)} kr` : `Inkl. felles innbetaling mottatt privat +${fmt(-utlegg)} kr`}
+                </div>
+            )}
             {bufferPerParty > 0 && (
                 <div className="text-xs text-purple-700 dark:text-purple-300 mt-1 flex items-center gap-1">
                     <PiggyBank className="w-3 h-3" /> + bufferoppbygging {fmt(bufferPerParty)} kr = <span className="font-semibold">{fmt(amount + bufferPerParty)} kr</span> å overføre

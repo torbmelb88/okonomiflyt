@@ -321,7 +321,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         }
         if (kind === KIND.purchase) {
             if (excludeFromSharedCalc || projectHoldsOut) parts.push(`utenfor oppgjør${(excludeFromSharedCalc ? coveredByAccountId : projectCoverAccount?.id) ? `, betales fra ${accountName(excludeFromSharedCalc ? coveredByAccountId : projectCoverAccount.id)}` : ''}`);
-            if (showUtlegg && asUtlegg) parts.push('utlegg');
+            if (showUtlegg && asUtlegg) parts.push(isIncome ? 'mottatt privat, legges til overføringen' : 'utlegg');
             if (isUnnecessary) parts.push('unødvendig');
             if (isExpense && awaitingRefund && !markRefundComplete) parts.push(`venter refusjon${expectedRefundAmount ? ` ${fmtKr(parseAmount(expectedRefundAmount))} kr` : ''}`);
             if (isExpense && markRefundComplete) parts.push('ferdig refundert');
@@ -510,7 +510,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const kinds = kindsForType(currentTransaction.type);
     const activeAdjustments = [
         kind === KIND.purchase && (excludeFromSharedCalc || projectHoldsOut) && 'Utenfor oppgjør',
-        kind === KIND.purchase && showUtlegg && asUtlegg && 'Utlegg',
+        kind === KIND.purchase && showUtlegg && asUtlegg && (isIncome ? 'Mottatt privat' : 'Utlegg'),
         kind === KIND.purchase && isUnnecessary && 'Unødvendig',
         kind === KIND.purchase && isExpense && awaitingRefund && !markRefundComplete && 'Venter refusjon',
         kind === KIND.purchase && isExpense && (!awaitingRefund || markRefundComplete) && linkedRefunds.length > 0 && 'Refundert',
@@ -795,8 +795,10 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                             {showUtlegg && (
                                                 <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
                                                     <input type="checkbox" checked={asUtlegg} onChange={(e) => setAsUtlegg(e.target.checked)} className="w-4 h-4 mt-0.5 rounded" />
-                                                    <span>Utlegg — jeg la ut med egne penger
-                                                        <InfoTip text="En felles utgift betalt fra privat konto. Beløpet trekkes fra det du skal overføre til felleskontoen." />
+                                                    <span>{isIncome ? 'Mottatt på min private konto' : 'Utlegg — jeg la ut med egne penger'}
+                                                        <InfoTip text={isIncome
+                                                            ? 'En innbetaling som hører til fellesøkonomien, men som landet på din private konto (f.eks. noen vippset deg for felles bensin). Beløpet legges til det du skal overføre til felleskontoen, så husholdningen får pengene.'
+                                                            : 'En felles utgift betalt fra privat konto. Beløpet trekkes fra det du skal overføre til felleskontoen.'} />
                                                     </span>
                                                 </label>
                                             )}

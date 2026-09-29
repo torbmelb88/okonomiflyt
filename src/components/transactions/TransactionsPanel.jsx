@@ -364,7 +364,9 @@ export default function TransactionsPanel({
                                                     </span>
                                                 )}
                                                 {trans.paidPrivatelyBy && (
-                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider" title="Felles utgift betalt fra egen konto — beløpet trekkes fra det du skal overføre til felleskontoen">Utlegg</span>
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider" title={trans.type === 'income'
+                                                        ? 'Felles innbetaling mottatt på egen konto — beløpet legges til det du skal overføre til felleskontoen'
+                                                        : 'Felles utgift betalt fra egen konto — beløpet trekkes fra det du skal overføre til felleskontoen'}>{trans.type === 'income' ? 'Mottatt privat' : 'Utlegg'}</span>
                                                 )}
                                                 {trans.refundSplit && (
                                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title="Innbetalingen er fordelt på flere kjøp — beløpet telles via de fordelte radene, ikke denne">
