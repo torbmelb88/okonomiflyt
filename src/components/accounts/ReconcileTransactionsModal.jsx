@@ -47,7 +47,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const { notify, confirm } = useDialog();
     const {
         allExpenses: expenses, budgetItemDefs, categories, ensureInstanceForDef,
-        addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, transactions: allTransactions,
+        addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, allTransactions,
         linkRefund, linkRefundSplit, unlinkRefund,
         setExpenseCover, setIncomeCover,
     } = useBudget();

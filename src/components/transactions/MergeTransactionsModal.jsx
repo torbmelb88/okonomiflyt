@@ -15,7 +15,7 @@ import { useDialog } from '../../contexts/DialogContext';
  */
 export default function MergeTransactionsModal({ isOpen, onClose, transaction }) {
     const { notify } = useDialog();
-    const { transactions, accounts, mergeTransactions } = useBudget();
+    const { allTransactions: transactions, accounts, mergeTransactions } = useBudget();
     const [search, setSearch] = useState('');
     const [otherId, setOtherId] = useState('');
     const [keepId, setKeepId] = useState('');
