@@ -88,6 +88,11 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
         const toFx = [];
         const rebookedIds = new Set();
         const fxClaimedIds = new Set();
+        // Rows already claimed by a fuzzy merge. Without this, two bank rows
+        // with the same amount (a purchase and a friend's repayment of it,
+        // seen 2026-09-28) both merged into ONE companion row: last write won,
+        // the other row lost its identity and came back as a twin later.
+        const matchClaimedIds = new Set();
         const pendingRows = [];
         let alreadyImported = 0, noAccount = 0, noBudget = 0, beforeFrom = 0;
 
@@ -107,6 +112,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                     const already = existingByExternalId.get(s.externalId);
                     const logged = !already && pacc && existing.find(t =>
                         t.accountId === pacc.id && !t.externalId && (!t.currency || t.currency === 'NOK') &&
+                        t.type === s.type &&
                         Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 && t.date && datesClose(t.date, s.date));
                     const note = already
                         ? (isSelfReported({ source: already.origin })
@@ -138,9 +144,13 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
             // Foreign-currency copies (companion app abroad, amount in SEK/EUR/…)
             // never equal the bank's converted NOK amount — an exact-amount hit
             // would be coincidence, so they are only linked manually via merge.
+            // Direction must agree: an incoming 148 is never the logged 148
+            // purchase, even on the same account and day.
             const match = existing.find(t =>
                 t.accountId === acc.id && !t.externalId &&
+                !matchClaimedIds.has(t.id) &&
                 (!t.currency || t.currency === 'NOK') &&
+                t.type === s.type &&
                 Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 &&
                 t.date && datesClose(t.date, s.date)
             );
@@ -173,6 +183,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 fxPlausible(t.currency, t.amount, s.amount)
             );
             if (match) {
+                matchClaimedIds.add(match.id);
                 // The bank confirming an existing (typically companion-app) row
                 // is the actual reconciliation — avstemt if also categorized.
                 toMerge.push({
