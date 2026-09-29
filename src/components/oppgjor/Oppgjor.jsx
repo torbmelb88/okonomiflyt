@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useBudget } from '../../contexts/BudgetContext';
 import { ArrowRight, Scale, Loader2, PiggyBank, CheckCircle2, AlertTriangle, ArrowLeftRight } from 'lucide-react';
 import BufferCard from './BufferCard';
@@ -15,8 +16,7 @@ import { coverIssues } from '../../utils/coverage';
  * gjennomreise red flag and the month-reconciled toggle.
  */
 export default function Oppgjor() {
-    const { sharedBudget, accounts, allProjects, allTransactions, currentUser, loading, monthStatuses, isMonthReconciled, setMonthReconciled } = useBudget();
-    const [savingReconciled, setSavingReconciled] = useState(false);
+    const { sharedBudget, accounts, allProjects, allTransactions, currentUser, loading, monthStatuses, isMonthReconciled } = useBudget();
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
         now.setMonth(now.getMonth() - 1); // previous month — what you settle now
@@ -45,11 +45,10 @@ export default function Oppgjor() {
         [allTransactions, sharedBudget, accounts, allProjects, selectedMonth, currentUser, roundingMode]
     );
 
+    // Set on Transaksjoner, where the work is done; read here.
     const monthReconciled = isMonthReconciled(selectedMonth);
     const reconciledAt = monthStatuses.find(ms => ms.month === selectedMonth)?.reconciledAt;
-    // Transactions the month can't really close on: 'booked' = self-reported,
-    // waiting for its bank copy (the Trumf invoice arrives ~the 15th the next
-    // month), 'unreconciled' = not categorized yet.
+    // Rows the month can't really close on, shown as a hint under the status.
     const pending = useMemo(() => {
         const states = allTransactions.filter(t => t.month === selectedMonth).map(reconcileState);
         return {
@@ -60,23 +59,7 @@ export default function Oppgjor() {
     // Transfers on gjennomreise whose payment is missing or doesn't add up.
     const coverProblems = useMemo(() => coverIssues(allTransactions, selectedMonth), [allTransactions, selectedMonth]);
     const coverProblemCount = coverProblems.reduce((s, g) => s + g.expenses.length, 0);
-    const pendingLabel = () => {
-        const n = (x) => x === 1 ? '1 transaksjon' : `${x} transaksjoner`;
-        const parts = [];
-        if (pending.booked > 0) parts.push(`${n(pending.booked)} er kun bokført (venter på bankmatch)`);
-        if (pending.unreconciled > 0) parts.push(`${n(pending.unreconciled)} er ikke kategorisert`);
-        if (coverProblemCount > 0) parts.push(`${coverProblemCount === 1 ? '1 overføring' : `${coverProblemCount} overføringer`} på gjennomreise mangler innbetaling`);
-        return parts.join(', ').replace(/, ([^,]*)$/, ' og $1');
-    };
-    const toggleReconciled = async () => {
-        if (!monthReconciled && pending.booked + pending.unreconciled + coverProblemCount > 0) {
-            if (!window.confirm(`${pendingLabel()} i ${formatMonth(selectedMonth)}. Vil du likevel markere måneden som avstemt?`)) return;
-        }
-        setSavingReconciled(true);
-        try { await setMonthReconciled(selectedMonth, !monthReconciled); }
-        catch { /* logget i BudgetContext */ }
-        finally { setSavingReconciled(false); }
-    };
+    const pendingCount = pending.booked + pending.unreconciled + coverProblemCount;
 
     const coveredFromList = useMemo(() => {
         const byAcc = {};
@@ -93,7 +76,8 @@ export default function Oppgjor() {
 
     if (loading) return <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 py-8 justify-center"><Loader2 className="w-5 h-5 animate-spin" /> Beregner oppgjør…</div>;
 
-    const PartyCard = ({ title, share, amount, utlegg, utleggLabel }) => (
+    // Render helper (not a component, so it is not recreated per render)
+    const partyCard = ({ title, share, amount, utlegg, utleggLabel }) => (
         <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-800">
             <div className="text-sm text-gray-600 dark:text-gray-400">{title} ({(share * 100).toFixed(0)}%)</div>
             <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{fmt(amount)} kr</div>
@@ -137,8 +121,8 @@ export default function Oppgjor() {
                         </span>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <PartyCard title="Du betaler" share={split.userShare} amount={split.userAmount} utlegg={split.utleggSelf} utleggLabel="dine utlegg" />
-                        <PartyCard title="Partner betaler" share={split.partnerShare} amount={split.partnerAmount} utlegg={split.utleggPartner} utleggLabel="partners utlegg" />
+                        {partyCard({ title: 'Du betaler', share: split.userShare, amount: split.userAmount, utlegg: split.utleggSelf, utleggLabel: 'dine utlegg' })}
+                        {partyCard({ title: 'Partner betaler', share: split.partnerShare, amount: split.partnerAmount, utlegg: split.utleggPartner, utleggLabel: 'partners utlegg' })}
                     </div>
                     <div className="flex justify-between items-center text-sm pt-4 mt-4 border-t border-gray-100 dark:border-gray-700">
                         <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Fordeles:
@@ -223,42 +207,22 @@ export default function Oppgjor() {
                 </div>
             )}
 
-            {/* Månedsstatus: markerer måneden som ferdig avstemt (monthStatuses, husholdningsvid) */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between gap-4">
-                {monthReconciled ? (
-                    <>
-                        <div className="flex items-center gap-3">
-                            <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
-                            <div>
-                                <div className="font-semibold text-gray-900 dark:text-gray-100 capitalize">{formatMonth(selectedMonth)} er avstemt</div>
-                                {reconciledAt && <div className="text-xs text-gray-500 dark:text-gray-400">Markert {new Date(reconciledAt).toLocaleDateString('no-NO', { day: 'numeric', month: 'long' })}</div>}
-                            </div>
-                        </div>
-                        <button onClick={toggleReconciled} disabled={savingReconciled}
-                            className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 underline disabled:opacity-50">
-                            Angre
-                        </button>
-                    </>
-                ) : (
-                    <>
-                        <div>
-                            <div className="text-sm text-gray-600 dark:text-gray-400">
-                                Marker <span className="capitalize font-medium">{formatMonth(selectedMonth)}</span> som ferdig avstemt når oppgjøret er gjennomført.
-                            </div>
-                            {pending.booked + pending.unreconciled + coverProblemCount > 0 && (
-                                <div className={`text-xs mt-1 ${coverProblemCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'}`}>
-                                    {pendingLabel()}.
-                                </div>
-                            )}
-                        </div>
-                        <button onClick={toggleReconciled} disabled={savingReconciled}
-                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex-shrink-0">
-                            {savingReconciled ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                            Marker som avstemt
-                            <InfoTip className="text-purple-200" text="Merker måneden som ferdig oppgjort for hele husholdningen. Da vises Likviditet på Min Oversikt som endelig. Ingenting låses — transaksjonene kan fortsatt endres, og du kan angre her." />
-                        </button>
-                    </>
-                )}
+            {/* Månedsstatus (monthStatuses, husholdningsvid) — settes på Transaksjoner */}
+            <div className={`p-4 rounded-xl border flex items-center gap-3 ${monthReconciled ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700'}`}>
+                {monthReconciled ? <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" /> : <AlertTriangle className="w-5 h-5 text-gray-400 flex-shrink-0" />}
+                <div className="text-sm">
+                    {monthReconciled ? (
+                        <span className="text-green-800 dark:text-green-200">
+                            <span className="capitalize font-medium">{formatMonth(selectedMonth)}</span> er markert som avstemt{reconciledAt ? ` ${new Date(reconciledAt).toLocaleDateString('no-NO', { day: 'numeric', month: 'long' })}` : ''}.
+                        </span>
+                    ) : (
+                        <span className="text-gray-600 dark:text-gray-400">
+                            <span className="capitalize font-medium">{formatMonth(selectedMonth)}</span> er ikke markert som avstemt ennå
+                            {pendingCount > 0 && <span className={coverProblemCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'}> ({pendingCount} {pendingCount === 1 ? 'rad venter' : 'rader venter'})</span>}
+                            . Det gjøres på <Link to="/transaksjoner" className="underline">Transaksjoner</Link> når alle radene er håndtert.
+                        </span>
+                    )}
+                </div>
             </div>
         </div>
     );

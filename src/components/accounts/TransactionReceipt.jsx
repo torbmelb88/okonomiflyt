@@ -3,6 +3,7 @@ import { ReceiptText, ChevronDown, ChevronUp, Link2, Recycle, TicketPercent } fr
 import { useBudget } from '../../contexts/BudgetContext';
 import { CATEGORY_LABELS } from '../../utils/groceryCategories';
 import clsx from 'clsx';
+import { useDialog } from '../../contexts/DialogContext';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -20,6 +21,7 @@ function withinDays(dateA, dateB, days) {
  * reimbursed by a rounded transfer days later).
  */
 export default function TransactionReceipt({ transaction }) {
+    const { notify } = useDialog();
     const { receipts, getReceiptItems, linkReceiptToTransaction } = useBudget();
     const [expanded, setExpanded] = useState(false);
     const [items, setItems] = useState(null);
@@ -66,7 +68,7 @@ export default function TransactionReceipt({ transaction }) {
         try {
             await linkReceiptToTransaction(target.id, transaction);
         } catch {
-            alert("Kunne ikke koble kvitteringen.");
+            notify({ message: "Kunne ikke koble kvitteringen.", variant: 'error' });
         } finally {
             setLinking(false);
         }

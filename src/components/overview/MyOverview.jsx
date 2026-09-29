@@ -12,8 +12,10 @@ import { refundStatus } from '../../utils/refunds';
 import { coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
 import { heldOutOfTransfer, coveredByAccountOf, computeSplit, readRoundingMode } from '../../utils/settlement';
 import { isMoneyMovement, isSalary } from '../../utils/kinds';
+import { useDialog } from '../../contexts/DialogContext';
 
 export default function MyOverview() {
+    const { notify } = useDialog();
     // Always MY personal budget — this page does not follow the plan-budget
     // toggle. `activeBudget` is kept as the local name for it.
     const { personalBudget, sharedBudget, allTransactions, accounts, allProjects, isMonthReconciled, updateBudget } = useBudget();
@@ -80,7 +82,7 @@ export default function MyOverview() {
             setEditing(null);
         } catch (err) {
             console.error('Could not save estimate', err);
-            alert('Kunne ikke lagre beløpet.');
+            notify({ message: 'Kunne ikke lagre beløpet.', variant: 'error' });
         } finally {
             setSavingEstimate(false);
         }

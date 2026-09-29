@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { X, Settings } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import CategoryManagerModal from '../settings/CategoryManagerModal';
+import { useDialog } from '../../contexts/DialogContext';
 
 export default function AddExpenseModal({ isOpen, onClose, onSave, expenseToEdit = null, hideAccount = false, selectedMonth }) {
+    const { notify } = useDialog();
     const { accounts, categories, addCategory } = useBudget();
     const [name, setName] = useState('');
     const [amount, setAmount] = useState('');
@@ -123,7 +125,7 @@ export default function AddExpenseModal({ isOpen, onClose, onSave, expenseToEdit
             onClose();
         } catch (error) {
             console.error("Failed to save expense", error);
-            alert("Kunne ikke lagre utgift.");
+            notify({ message: "Kunne ikke lagre utgift.", variant: 'error' });
         } finally {
             setLoading(false);
         }

@@ -918,6 +918,15 @@ export function BudgetProvider({ children }) {
         try {
             await api.updateDocument('categories', id, patch);
             setCategories(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+            // A renamed category is carried by every instance under its defs
+            if (patch.name) {
+                const defIds = budgetItemDefs.filter(d => d.categoryId === id).map(d => d.id);
+                const targets = allExpenses.filter(e => defIds.includes(e.defId));
+                await Promise.all(targets.map(e => api.updateDocument('expenses', e.id, { category: patch.name })));
+                const apply = (list) => list.map(e => defIds.includes(e.defId) ? { ...e, category: patch.name } : e);
+                setAllExpenses(apply);
+                setExpenses(apply);
+            }
         } catch (error) {
             console.error("Error updating category:", error);
             throw error;
@@ -962,9 +971,25 @@ export function BudgetProvider({ children }) {
         return created;
     };
 
+    // Pushes a def's name/category down to its per-budget instances, so a
+    // renamed budget item reads the same in every list (transactions show the
+    // instance's name).
+    const syncInstancesOfDef = async (defId, patch) => {
+        const targets = allExpenses.filter(e => e.defId === defId);
+        if (targets.length === 0) return;
+        await Promise.all(targets.map(e => api.updateDocument('expenses', e.id, patch)));
+        const apply = (list) => list.map(e => e.defId === defId ? { ...e, ...patch } : e);
+        setAllExpenses(apply);
+        setExpenses(apply);
+    };
+
     const updateBudgetItemDef = async (id, data) => {
         await api.updateDocument('budgetItemDefs', id, data);
         setBudgetItemDefs(prev => prev.map(d => d.id === id ? { ...d, ...data } : d));
+        const patch = {};
+        if (data.name) patch.name = data.name;
+        if (data.categoryId) patch.category = categories.find(c => c.id === data.categoryId)?.name || 'Annet';
+        if (Object.keys(patch).length) await syncInstancesOfDef(id, patch);
     };
 
     const deleteBudgetItemDef = async (id) => {

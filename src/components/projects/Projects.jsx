@@ -3,6 +3,7 @@ import { FolderOpen, Plus, Pencil, Trash2, ChevronDown, ChevronUp, X, Check, Fol
 import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
 import clsx from 'clsx';
+import { useDialog } from '../../contexts/DialogContext';
 
 const emptyForm = { name: '', description: '', targetAmount: '', budgetId: '', subcategories: [], subcatRenames: [], excludeFromSharedCalc: false, coveredByAccountId: '' };
 
@@ -37,6 +38,7 @@ const groupByMonth = (txns) => {
 };
 
 export default function Projects() {
+    const { notify, confirm } = useDialog();
     const { allProjects: projects, addProject, updateProject, deleteProject, budgets, accounts, personalBudget } = useBudget();
 
     const [expandedId, setExpandedId] = useState(null);
@@ -85,7 +87,7 @@ export default function Projects() {
             }));
         } catch (err) {
             console.error('Failed to set subcategory', err);
-            alert('Kunne ikke oppdatere underkategori.');
+            notify({ message: 'Kunne ikke oppdatere underkategori.', variant: 'error' });
         }
     };
 
@@ -172,14 +174,14 @@ export default function Projects() {
             setForm(emptyForm);
         } catch (err) {
             console.error('Failed to update project', err);
-            alert('Kunne ikke lagre prosjektet: ' + err.message);
+            notify({ message: 'Kunne ikke lagre prosjektet: ' + err.message, variant: 'error' });
         } finally {
             setSaving(false);
         }
     };
 
     const handleDelete = async (id) => {
-        if (!window.confirm('Slette prosjektet? Transaksjoner tilknyttet prosjektet beholdes, men mister prosjekttilknytningen.')) return;
+        if (!await confirm({ title: 'Slette prosjektet?', message: 'Transaksjoner tilknyttet prosjektet beholdes, men mister prosjekttilknytningen.', confirmText: 'Slett', variant: 'danger' })) return;
         await deleteProject(id);
         if (expandedId === id) setExpandedId(null);
     };

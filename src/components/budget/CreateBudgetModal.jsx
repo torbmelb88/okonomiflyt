@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { X, Wallet, Users } from 'lucide-react';
 import clsx from 'clsx';
+import { useDialog } from '../../contexts/DialogContext';
 
 export default function CreateBudgetModal({ isOpen, onClose, onCreate }) {
+    const { notify } = useDialog();
     const [name, setName] = useState('');
     const [type, setType] = useState('personal');
     const [loading, setLoading] = useState(false);
@@ -21,7 +23,7 @@ export default function CreateBudgetModal({ isOpen, onClose, onCreate }) {
             setType('personal');
         } catch (error) {
             console.error("Failed to create budget", error);
-            alert("Kunne ikke opprette budsjett. Prøv igjen.");
+            notify({ message: "Kunne ikke opprette budsjett. Prøv igjen.", variant: 'error' });
         } finally {
             setLoading(false);
         }

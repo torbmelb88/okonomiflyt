@@ -4,6 +4,7 @@ import { invoiceRowsToImportRows } from '../../utils/trumfInvoice';
 import TrumfInvoiceImportModal from './TrumfInvoiceImportModal';
 import { matchRowsAgainstExisting } from './importPipeline';
 import { useImportReview } from './useImportReview';
+import { useDialog } from '../../contexts/DialogContext';
 
 /**
  * Credit-card invoice import: the Trumf Kredittkort PDF is the only
@@ -17,6 +18,7 @@ import { useImportReview } from './useImportReview';
  * the duplicate check guards against importing the same invoice twice.
  */
 export default function TrumfInvoiceImportFlow({ isOpen, onClose, accounts }) {
+    const { notify } = useDialog();
     const { transactions, updateTransaction, updateAccount } = useBudget();
     const { review, modals } = useImportReview();
 
@@ -27,7 +29,7 @@ export default function TrumfInvoiceImportFlow({ isOpen, onClose, accounts }) {
             existing = await api.queryCollection('transactions', 'accountId', accountId);
         } catch (fetchErr) {
             console.error('Error fetching existing transactions for duplicate check:', fetchErr);
-            alert('Advarsel: Kunne ikke hente alle eksisterende transaksjoner. Duplikatsjekk kan være ufullstendig.');
+            notify({ message: 'Advarsel: Kunne ikke hente alle eksisterende transaksjoner. Duplikatsjekk kan være ufullstendig.', variant: 'error' });
             existing = transactions.filter(t => t.accountId === accountId);
         }
 

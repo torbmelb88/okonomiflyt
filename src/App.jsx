@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { BudgetProvider } from './contexts/BudgetContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { DialogProvider } from './contexts/DialogContext';
 import Layout from './components/layout/Layout';
 
 import Settings from './components/settings/Settings';
@@ -46,6 +47,7 @@ function App() {
   return (
     <AuthProvider>
       <ThemeProvider>
+        <DialogProvider>
         <BudgetProvider>
           {/* basename følger Vites base-path (f.eks. /okonomiflyt/ på GitHub Pages) */}
           <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
@@ -74,6 +76,7 @@ function App() {
             </Routes>
           </BrowserRouter>
         </BudgetProvider>
+        </DialogProvider>
       </ThemeProvider>
     </AuthProvider>
   );

@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
 import { stringsAreSimilar } from '../../utils/textMatch';
 import { reconcileState } from '../../utils/reconciliation';
+import { useDialog } from '../../contexts/DialogContext';
 
 /**
  * Manual duplicate merge: pick the duplicate of `transaction`, then choose
@@ -13,6 +14,7 @@ import { reconcileState } from '../../utils/reconciliation';
  * from both copies is combined either way.
  */
 export default function MergeTransactionsModal({ isOpen, onClose, transaction }) {
+    const { notify } = useDialog();
     const { transactions, accounts, mergeTransactions } = useBudget();
     const [search, setSearch] = useState('');
     const [otherId, setOtherId] = useState('');
@@ -70,7 +72,7 @@ export default function MergeTransactionsModal({ isOpen, onClose, transaction })
             onClose();
         } catch (error) {
             console.error('Merge failed', error);
-            alert('Kunne ikke slå sammen: ' + error.message);
+            notify({ message: 'Kunne ikke slå sammen: ' + error.message, variant: 'error' });
         } finally {
             setSaving(false);
         }

@@ -5,6 +5,7 @@ import AccountGrid from './AccountGrid';
 import AddAccountModal from './AddAccountModal';
 import ImportAccountsModal from './ImportAccountsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
+import { useDialog } from '../../contexts/DialogContext';
 
 /**
  * Kontoer = account management (balances, sharing) for everything: bank
@@ -13,6 +14,7 @@ import ConfirmationModal from '../common/ConfirmationModal';
  * Import page.
  */
 export default function Accounts() {
+    const { notify } = useDialog();
     const { activeBudget, accounts, loading, addAccount, updateAccount, deleteAccount } = useBudget();
 
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -50,7 +52,7 @@ export default function Accounts() {
             await deleteAccount(deleteConfirmation.id);
         } catch (err) {
             console.error('Delete failed:', err);
-            alert('Kunne ikke slette: ' + err.message);
+            notify({ message: 'Kunne ikke slette: ' + err.message, variant: 'error' });
         }
     };
 

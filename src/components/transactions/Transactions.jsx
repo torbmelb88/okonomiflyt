@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useBudget } from '../../contexts/BudgetContext';
-import { AlertTriangle, CheckCircle2, Download } from 'lucide-react';
+import { Download } from 'lucide-react';
 import TransactionsPanel from './TransactionsPanel';
+import MonthStatusCard from './MonthStatusCard';
+import { currentMonth } from '../../utils/provisional';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
 import { coverIssues } from '../../utils/coverage';
+import { useDialog } from '../../contexts/DialogContext';
 
 /**
  * Transaksjoner = the raw transaction list and reconciliation. Owns the
@@ -15,7 +18,8 @@ import { coverIssues } from '../../utils/coverage';
  * the Import page; plan vs. actual lives on the Budsjett page.
  */
 export default function Transactions() {
-    const { allTransactions: transactions, accounts, loading, isMonthReconciled } = useBudget();
+    const { confirm } = useDialog();
+    const { allTransactions: transactions, accounts, loading, isMonthReconciled, monthStatuses, setMonthReconciled } = useBudget();
 
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
@@ -23,9 +27,14 @@ export default function Transactions() {
     });
     const [reconcileNonce, setReconcileNonce] = useState(0);
     const [focusNonce, setFocusNonce] = useState(0);
+    const [savingReconciled, setSavingReconciled] = useState(false);
 
     if (loading) return <div>Laster transaksjoner...</div>;
 
+    const monthEndLabel = (monthStr) => {
+        const [year, month] = monthStr.split('-').map(Number);
+        return new Date(year, month, 0).toLocaleDateString('no-NO', { day: 'numeric', month: 'long' });
+    };
     const formatMonth = (monthStr) => {
         const [year, month] = monthStr.split('-');
         return new Date(year, parseInt(month) - 1).toLocaleDateString('no-NO', { month: 'long', year: 'numeric' });
@@ -42,7 +51,29 @@ export default function Transactions() {
     // reconcile state — such a row may well be «avstemt» as Sparing.
     const coverProblems = coverIssues(transactions, selectedMonth);
     const coverProblemRows = coverProblems.flatMap(g => g.expenses);
+
+    // «Måneden er avstemt» (monthStatuses, household-wide) is set here, where
+    // the work is done: it means every row for the month is handled. Min
+    // Oversikt shows liquidity as final once it is set; Oppgjør only reads it.
     const monthReconciled = isMonthReconciled(selectedMonth);
+    const reconciledAt = monthStatuses.find(ms => ms.month === selectedMonth)?.reconciledAt;
+    const pendingLabel = () => {
+        const n = (x) => x === 1 ? '1 transaksjon' : `${x} transaksjoner`;
+        const parts = [];
+        if (bookedCount > 0) parts.push(`${n(bookedCount)} er kun bokført (venter på bankmatch)`);
+        if (unreconciledCount > 0) parts.push(`${n(unreconciledCount)} er ikke kategorisert`);
+        if (coverProblemRows.length > 0) parts.push(`${coverProblemRows.length === 1 ? '1 overføring' : `${coverProblemRows.length} overføringer`} på gjennomreise mangler innbetaling`);
+        return parts.join(', ').replace(/, ([^,]*)$/, ' og $1');
+    };
+    const toggleReconciled = async () => {
+        if (!monthReconciled && bookedCount + unreconciledCount + coverProblemRows.length > 0) {
+            if (!await confirm({ title: 'Markere måneden som avstemt likevel?', message: `${pendingLabel()} i ${formatMonth(selectedMonth)}.`, confirmText: 'Marker som avstemt', variant: 'warning' })) return;
+        }
+        setSavingReconciled(true);
+        try { await setMonthReconciled(selectedMonth, !monthReconciled); }
+        catch { /* logget i BudgetContext */ }
+        finally { setSavingReconciled(false); }
+    };
 
     return (
         <div className="space-y-6">
@@ -57,67 +88,22 @@ export default function Transactions() {
                 </Link>
             </div>
 
-            {/* Two-state banner */}
-            {unreconciledCount > 0 ? (
-                <div className="flex items-center justify-between gap-4 p-4 rounded-xl border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
-                    <div className="flex items-center gap-3">
-                        <AlertTriangle className="w-6 h-6 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                        <div>
-                            <div className="font-semibold text-amber-800 dark:text-amber-200">
-                                {unreconciledCount} {unreconciledCount === 1 ? 'transaksjon trenger' : 'transaksjoner trenger'} oppfølging
-                            </div>
-                            <div className="text-sm text-amber-700 dark:text-amber-300">Koble dem til budsjettposter for å få riktig forbruk for {formatMonth(selectedMonth)}.</div>
-                        </div>
-                    </div>
-                    <button
-                        onClick={() => setReconcileNonce(n => n + 1)}
-                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg shadow-sm whitespace-nowrap"
-                    >
-                        Avstem nå
-                    </button>
-                </div>
-            ) : (
-                <div className="flex items-center gap-3 p-4 rounded-xl border bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
-                    <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" />
-                    <div>
-                        <div className="font-semibold text-green-800 dark:text-green-200">
-                            Alt håndtert for {formatMonth(selectedMonth)} — forbruket er koblet til budsjettpostene.
-                        </div>
-                        {bookedCount > 0 && (
-                            <div className="text-sm text-green-700 dark:text-green-300">
-                                {bookedCount} {bookedCount === 1 ? 'bokført transaksjon venter' : 'bokførte transaksjoner venter'} på avstemming mot banken — beløpene bekreftes ved neste bankimport.
-                            </div>
-                        )}
-                        <div className="text-sm text-green-700 dark:text-green-300">
-                            {monthReconciled
-                                ? 'Måneden er markert som avstemt på Oppgjør.'
-                                : <>Måneden er ikke markert som avstemt ennå — gjør det på <Link to="/oppgjor" className="underline">Oppgjør</Link> når overføringene er gjort.</>}
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Where the month stands: checklist + marking (MonthStatusCard) */}
+            <MonthStatusCard
 
-            {coverProblemRows.length > 0 && (
-                <div className="flex items-center justify-between gap-4 p-4 rounded-xl border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
-                    <div className="flex items-center gap-3">
-                        <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0" />
-                        <div>
-                            <div className="font-semibold text-red-800 dark:text-red-200">
-                                Gjennomreise: {coverProblemRows.length} {coverProblemRows.length === 1 ? 'overføring mangler' : 'overføringer mangler'} innbetaling
-                            </div>
-                            <div className="text-sm text-red-700 dark:text-red-300">
-                                Merket som gjennomreise, men innbetalingen er ikke koblet eller summene stemmer ikke. Sjekk at pengene faktisk kom inn.
-                            </div>
-                        </div>
-                    </div>
-                    <button
-                        onClick={() => setFocusNonce(n => n + 1)}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg shadow-sm whitespace-nowrap"
-                    >
-                        Koble innbetaling
-                    </button>
-                </div>
-            )}
+                monthLabel={formatMonth(selectedMonth)}
+                isOver={selectedMonth < currentMonth()}
+                endsLabel={monthEndLabel(selectedMonth)}
+                unreconciledCount={unreconciledCount}
+                coverProblemCount={coverProblemRows.length}
+                bookedCount={bookedCount}
+                monthReconciled={monthReconciled}
+                reconciledAt={reconciledAt}
+                saving={savingReconciled}
+                onReconcileNow={() => setReconcileNonce(n => n + 1)}
+                onFixCover={() => setFocusNonce(n => n + 1)}
+                onToggleReconciled={toggleReconciled}
+            />
 
             {/* Transactions (all accounts, bank + credit card) */}
             <TransactionsPanel

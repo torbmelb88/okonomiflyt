@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { X, CreditCard, Building, Wallet, Share2, PiggyBank } from 'lucide-react';
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
+import { useDialog } from '../../contexts/DialogContext';
 
 export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit = null, defaultType = 'Bankkonto' }) {
+    const { notify } = useDialog();
     const { budgets, activeBudget } = useBudget();
     const [name, setName] = useState('');
     const [type, setType] = useState(defaultType);
@@ -60,7 +62,7 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
             onClose();
         } catch (error) {
             console.error("Failed to save account", error);
-            alert("Kunne ikke lagre konto.");
+            notify({ message: "Kunne ikke lagre konto.", variant: 'error' });
         } finally {
             setLoading(false);
         }

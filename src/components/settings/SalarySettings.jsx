@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Banknote, Save } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import { parseAmount2 } from '../../utils/provisional';
+import { useDialog } from '../../contexts/DialogContext';
 
 const inputCls = 'w-48 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none';
 
@@ -12,6 +13,7 @@ const inputCls = 'w-48 px-4 py-2 border border-gray-300 dark:border-gray-600 rou
  * the real transactions arrive. Renders nothing for shared budgets.
  */
 export default function SalarySettings({ budget }) {
+    const { notify } = useDialog();
     const { updateBudget } = useBudget();
     const [salary, setSalary] = useState('');
     const [savings, setSavings] = useState('');
@@ -39,7 +41,7 @@ export default function SalarySettings({ budget }) {
             setSaved(true);
         } catch (err) {
             console.error('Could not save expected amounts', err);
-            alert('Kunne ikke lagre: ' + err.message);
+            notify({ message: 'Kunne ikke lagre: ' + err.message, variant: 'error' });
         } finally {
             setSaving(false);
         }

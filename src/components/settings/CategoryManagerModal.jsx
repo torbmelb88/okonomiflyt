@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { X, Plus, Trash2, Edit2, Check } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import ConfirmationModal from '../common/ConfirmationModal';
+import { useDialog } from '../../contexts/DialogContext';
 
 export default function CategoryManagerModal({ isOpen, onClose }) {
+    const { notify } = useDialog();
     const { categories, addCategory, updateCategory, deleteCategory } = useBudget();
     const [newCategory, setNewCategory] = useState('');
     const [editingId, setEditingId] = useState(null);
@@ -19,7 +21,7 @@ export default function CategoryManagerModal({ isOpen, onClose }) {
             await addCategory(newCategory.trim());
             setNewCategory('');
         } catch {
-            alert("Kunne ikke legge til kategori.");
+            notify({ message: "Kunne ikke legge til kategori.", variant: 'error' });
         }
     };
 
@@ -30,7 +32,7 @@ export default function CategoryManagerModal({ isOpen, onClose }) {
             setEditingId(null);
             setEditName('');
         } catch {
-            alert("Kunne ikke oppdatere kategori.");
+            notify({ message: "Kunne ikke oppdatere kategori.", variant: 'error' });
         }
     };
 
@@ -40,7 +42,7 @@ export default function CategoryManagerModal({ isOpen, onClose }) {
             await deleteCategory(deleteConfirmation.id);
             setDeleteConfirmation({ isOpen: false, id: null });
         } catch {
-            alert("Kunne ikke slette kategori.");
+            notify({ message: "Kunne ikke slette kategori.", variant: 'error' });
         }
     };
 

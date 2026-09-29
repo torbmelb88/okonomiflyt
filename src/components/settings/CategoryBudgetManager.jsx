@@ -4,6 +4,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 import ConfirmationModal from '../common/ConfirmationModal';
 import InfoTip from '../common/InfoTip';
 import { SCOPE_LABEL } from '../../utils/categoryMigration';
+import { useDialog } from '../../contexts/DialogContext';
 
 // «Utenfor statistikk» only touches the Budsjett page totals (Budget.jsx
 // isItemExcludedFromStats) — the budget, the settlement and Min Oversikt
@@ -24,6 +25,7 @@ const scopeClass = (s) => s === 'both'
  * by scope; amounts/transactions live per budget, not here.
  */
 export default function CategoryBudgetManager() {
+    const { notify } = useDialog();
     const {
         categories, addCategory, updateCategory, deleteCategory,
         budgetItemDefs, addBudgetItemDef, updateBudgetItemDef, deleteBudgetItemDef,
@@ -63,7 +65,7 @@ export default function CategoryBudgetManager() {
             if (confirm.kind === 'category') await deleteCategory(confirm.id);
             else if (confirm.kind === 'def') await deleteBudgetItemDef(confirm.id);
         } catch (e) {
-            alert('Kunne ikke slette: ' + e.message);
+            notify({ message: 'Kunne ikke slette: ' + e.message, variant: 'error' });
         }
     };
 

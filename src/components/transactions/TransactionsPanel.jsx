@@ -14,6 +14,7 @@ import ConfirmationModal from '../common/ConfirmationModal';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
 import { coverGroups, COVER_STATUS_LABEL } from '../../utils/coverage';
 import { isMoneyMovement } from '../../utils/kinds';
+import { useDialog } from '../../contexts/DialogContext';
 
 /**
  * Reusable transaction engine: month navigation, summary, account filter,
@@ -29,12 +30,22 @@ export default function TransactionsPanel({
     focusIds,
     focusNonce,
 }) {
+    const { notify } = useDialog();
     // Household-wide: every budget's rows, with the names of budget items and
     // projects from every budget.
     const {
         allExpenses: expenses, allTransactions: transactions, allProjects: projects, allProjects, receipts, budgets,
+        budgetItemDefs, categories,
         deleteTransaction, deleteTransactions,
     } = useBudget();
+    // The name to show for a linked budget item: the library def's current
+    // name and category win over the instance's stored copy (instances logged
+    // before a rename may still carry the old name).
+    const linkedLabel = (inst) => {
+        const def = inst?.defId ? budgetItemDefs.find(d => d.id === inst.defId) : null;
+        const cat = def ? categories.find(c => c.id === def.categoryId)?.name : null;
+        return { name: def?.name || inst?.name, category: cat || inst?.category };
+    };
 
     const [selectedAccount, setSelectedAccount] = useState(null);
     const [selectedBudgetId, setSelectedBudgetId] = useState(null); // null = all budgets
@@ -184,7 +195,7 @@ export default function TransactionsPanel({
 
     const handleDeleteAllTransactions = () => {
         if (displayedTransactions.length === 0) {
-            alert('Ingen transaksjoner å slette.');
+            notify('Ingen transaksjoner å slette.');
             return;
         }
         setDeleteConfirmation({ isOpen: true, id: null, type: 'all_transactions', count: displayedTransactions.length });
@@ -200,7 +211,7 @@ export default function TransactionsPanel({
             }
         } catch (err) {
             console.error('Delete failed:', err);
-            alert('Kunne ikke slette: ' + err.message);
+            notify({ message: 'Kunne ikke slette: ' + err.message, variant: 'error' });
         }
     };
 
@@ -211,7 +222,7 @@ export default function TransactionsPanel({
             setReconcileMode('queue');
             setIsReconcileModalOpen(true);
         } else {
-            alert('Ingen uavstemte transaksjoner funnet.');
+            notify('Ingen uavstemte transaksjoner funnet.');
         }
     };
 
@@ -389,10 +400,10 @@ export default function TransactionsPanel({
                                                 {exclusionReason(trans, accounts, allProjects) && <span className="ml-1 text-orange-500" title={EXCLUSION_LABEL[exclusionReason(trans, accounts, allProjects)]}>*</span>}
                                             </div>
                                             <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
-                                                <span>{trans.date} • {linkedExpense ? linkedExpense.category : (trans.category || 'Ukategorisert')}</span>
+                                                <span>{trans.date} • {linkedExpense ? linkedLabel(linkedExpense).category : (trans.category || 'Ukategorisert')}</span>
                                                 {linkedExpense && (
                                                     <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                                                        <Link2 className="w-3 h-3 flex-shrink-0" />{linkedExpense.name}
+                                                        <Link2 className="w-3 h-3 flex-shrink-0" />{linkedLabel(linkedExpense).name}
                                                     </span>
                                                 )}
                                                 {linkedProject && (

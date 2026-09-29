@@ -12,6 +12,7 @@ import { isVirtualExpense, SCOPE_LABEL } from '../../utils/categoryMigration';
 import { computeSplit, readRoundingMode } from '../../utils/settlement';
 import InfoTip from '../common/InfoTip';
 import clsx from 'clsx';
+import { useDialog } from '../../contexts/DialogContext';
 
 const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#6b7280', '#ef4444'];
 const fmt = (n) => Math.round(n).toLocaleString('no-NO');
@@ -41,6 +42,7 @@ function BudgetAmountInput({ value, onCommit, className }) {
  * here means the same as it did on the old Forbruk page.
  */
 export default function Budget() {
+    const { notify } = useDialog();
     const {
         activeBudget, expenses, transactions, allTransactions, categories, budgetItemDefs, loading, accounts, allProjects, sharedBudget,
         addCategory, addBudgetItemDef, addExpense, getMonthlyBudget, setMonthlyBudget, deleteMonthlyBudget,
@@ -158,7 +160,7 @@ export default function Budget() {
             }
         } catch (e) {
             console.error('Failed to set amount', e);
-            alert('Kunne ikke lagre beløp: ' + e.message);
+            notify({ message: 'Kunne ikke lagre beløp: ' + e.message, variant: 'error' });
         }
     };
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import { SCOPE_LABEL } from '../../utils/categoryMigration';
+import { useDialog } from '../../contexts/DialogContext';
 
 const SCOPES = ['both', 'shared', 'private'];
 
@@ -11,6 +12,7 @@ const SCOPES = ['both', 'shared', 'private'];
  * Auto-inclusion then shows it in every budget its scope covers.
  */
 export default function AddBudgetItemModal({ isOpen, onClose, onCreate, defaultScope = 'both' }) {
+    const { notify } = useDialog();
     const { categories } = useBudget();
     const [name, setName] = useState('');
     const [amount, setAmount] = useState('');
@@ -49,7 +51,7 @@ export default function AddBudgetItemModal({ isOpen, onClose, onCreate, defaultS
             onClose();
         } catch (error) {
             console.error('Failed to create budget item', error);
-            alert('Kunne ikke opprette budsjettpost.');
+            notify({ message: 'Kunne ikke opprette budsjettpost.', variant: 'error' });
         } finally {
             setLoading(false);
         }

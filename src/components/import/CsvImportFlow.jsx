@@ -4,6 +4,7 @@ import { api } from '../../services/firebase';
 import ImportCSVModal from '../accounts/ImportCSVModal';
 import { matchRowsAgainstExisting } from './importPipeline';
 import { useImportReview } from './useImportReview';
+import { useDialog } from '../../contexts/DialogContext';
 
 /**
  * The manual CSV import flow: file/account picker and CSV parsing. The
@@ -14,6 +15,7 @@ import { useImportReview } from './useImportReview';
  * Only rows inside `selectedMonth` are imported; the parent owns that choice.
  */
 export default function CsvImportFlow({ isOpen, onClose, accounts, selectedMonth }) {
+    const { notify } = useDialog();
     const { transactions, updateTransaction } = useBudget();
     const { review, modals } = useImportReview();
 
@@ -28,7 +30,7 @@ export default function CsvImportFlow({ isOpen, onClose, accounts, selectedMonth
                 existingAccountTransactions = await api.queryCollection('transactions', 'accountId', accountId);
             } catch (fetchErr) {
                 console.error('Error fetching existing transactions for duplicate check:', fetchErr);
-                alert('Advarsel: Kunne ikke hente alle eksisterende transaksjoner. Duplikatsjekk kan være ufullstendig.');
+                notify({ message: 'Advarsel: Kunne ikke hente alle eksisterende transaksjoner. Duplikatsjekk kan være ufullstendig.', variant: 'error' });
                 existingAccountTransactions = transactions.filter(t => t.accountId === accountId);
             }
 
@@ -195,7 +197,7 @@ export default function CsvImportFlow({ isOpen, onClose, accounts, selectedMonth
                 },
                 error: (error) => {
                     console.error('CSV Parse Error:', error);
-                    alert('Kunne ikke lese CSV-filen.');
+                    notify({ message: 'Kunne ikke lese CSV-filen.', variant: 'error' });
                 },
             });
         } catch (error) {

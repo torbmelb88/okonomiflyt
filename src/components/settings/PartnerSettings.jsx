@@ -2,8 +2,10 @@ import { useBudget } from '../../contexts/BudgetContext';
 import { useState, useEffect } from 'react';
 import { Users, Save, DollarSign, Calculator, Percent, Coins } from 'lucide-react';
 import InfoTip from '../common/InfoTip';
+import { useDialog } from '../../contexts/DialogContext';
 
 export default function PartnerSettings({ budget }) {
+    const { notify } = useDialog();
     const { updateBudget, currentUser, loading } = useBudget();
 
     // State
@@ -87,10 +89,10 @@ export default function PartnerSettings({ budget }) {
             localStorage.setItem('roundingMode', String(roundingMode));
 
             await updateBudget(budget.id, updateData);
-            alert('Innstillinger lagret!');
+            notify({ message: 'Innstillingene er lagret.', variant: 'success' });
         } catch (error) {
             console.error("Failed to save settings:", error);
-            alert('Kunne ikke lagre innstillinger.');
+            notify({ message: 'Kunne ikke lagre innstillinger.', variant: 'error' });
         } finally {
             setSaving(false);
         }

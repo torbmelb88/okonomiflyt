@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useBudget } from '../../contexts/BudgetContext';
 import DuplicateReviewModal from '../accounts/DuplicateReviewModal';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
+import { useDialog } from '../../contexts/DialogContext';
 
 /**
  * The review tail shared by every manual import (CSV, invoice PDF): walk the
@@ -15,6 +16,7 @@ import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
  *   return <>{...}{modals}</>;
  */
 export function useImportReview() {
+    const { notify } = useDialog();
     const { addTransaction, updateTransaction } = useBudget();
 
     const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
@@ -53,11 +55,11 @@ export function useImportReview() {
         }
 
         if (msg) {
-            alert(msg + skippedMsg);
+            await notify({ title: 'Import fullført', message: msg + skippedMsg, variant: 'success' });
         } else if (failureReasons.length > 0) {
-            alert('Noe gikk galt:\n' + failureReasons.join('\n'));
+            notify({ message: 'Noe gikk galt:\n' + failureReasons.join('\n'), variant: 'error' });
         } else {
-            alert(`Ingen nye transaksjoner importert.${skippedMsg}`);
+            await notify({ title: 'Ingen nye transaksjoner', message: `Ingen nye transaksjoner importert.${skippedMsg}` });
         }
 
         if (finalNewTransactions.length > 0) {

@@ -13,10 +13,12 @@ import ConfirmationModal from '../common/ConfirmationModal';
 import InfoTip from '../common/InfoTip';
 import { CATEGORY_LABELS, CATEGORY_COLORS, formatKr, canonicalizeVareName, chainGroupOf, chainLabel } from '../../utils/groceryCategories';
 import clsx from 'clsx';
+import { useDialog } from '../../contexts/DialogContext';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function Groceries() {
+    const { notify } = useDialog();
     const {
         receipts, allReceiptItems, getAllReceiptItems,
         deleteReceipt, linkReceiptToTransaction, unlinkReceipt, allTransactions: transactions
@@ -146,7 +148,7 @@ export default function Groceries() {
         try {
             await deleteReceipt(deleteTarget);
         } catch {
-            alert("Kunne ikke slette kvitteringen.");
+            notify({ message: "Kunne ikke slette kvitteringen.", variant: 'error' });
         }
     };
 
@@ -454,6 +456,7 @@ function EmptyHint({ text }) {
 }
 
 function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, onLink, onUnlink }) {
+    const { notify } = useDialog();
     const [linking, setLinking] = useState(false);
     const isMatched = !!receipt.transactionId;
 
@@ -462,7 +465,7 @@ function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, 
         try {
             await onLink(transaction);
         } catch {
-            alert("Kunne ikke koble kvitteringen.");
+            notify({ message: "Kunne ikke koble kvitteringen.", variant: 'error' });
         } finally {
             setLinking(false);
         }
@@ -473,7 +476,7 @@ function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, 
         try {
             await onUnlink();
         } catch {
-            alert("Kunne ikke løse kvitteringen fra transaksjonen.");
+            notify({ message: "Kunne ikke løse kvitteringen fra transaksjonen.", variant: 'error' });
         } finally {
             setLinking(false);
         }

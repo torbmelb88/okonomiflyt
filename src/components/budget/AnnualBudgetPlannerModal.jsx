@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { X, Calendar, Save, Check } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
+import { useDialog } from '../../contexts/DialogContext';
 
 export default function AnnualBudgetPlannerModal({ isOpen, onClose }) {
+    const { notify } = useDialog();
     const { expenses, getMonthlyBudget, setMonthlyBudget } = useBudget();
     const [selectedExpenseId, setSelectedExpenseId] = useState('');
     const [year] = useState(new Date().getFullYear());
@@ -91,10 +93,9 @@ export default function AnnualBudgetPlannerModal({ isOpen, onClose }) {
                 }
             }
             setMonthlyValues(newValues);
-            // alert('Lagret!'); // Maybe too intrusive?
         } catch (error) {
             console.error("Failed to save annual plan", error);
-            alert("Feil ved lagring.");
+            notify({ message: "Feil ved lagring.", variant: 'error' });
         } finally {
             setSaving(false);
         }

@@ -12,6 +12,7 @@ import RefundAllocationEditor from './RefundAllocationEditor';
 import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
 import { KIND, KIND_CATEGORY, KIND_EMOJI, KIND_HELP, kindsForType, kindLabelFor, transactionKind, isKindCategory, isSalary } from '../../utils/kinds';
 import clsx from 'clsx';
+import { useDialog } from '../../contexts/DialogContext';
 
 const fmtKr = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('no-NO');
 const daysBetween = (a, b) => Math.abs((new Date(a) - new Date(b)) / 86400000);
@@ -43,6 +44,7 @@ const listCls = "max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-g
  * `mode`: 'queue' walks a batch (import, «Avstem»), 'edit' opens one row.
  */
 export default function ReconcileTransactionsModal({ isOpen, onClose, transactions, onComplete, mode = 'queue' }) {
+    const { notify, confirm } = useDialog();
     const {
         expenses, budgetItemDefs, categories, ensureInstanceForDef,
         addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, transactions: allTransactions,
@@ -350,7 +352,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         const tx = currentTransaction;
         if (!k || saving) return;
         if (liveTx.refundSplit && k !== KIND.refund) {
-            alert('Innbetalingen er fordelt på flere kjøp. Fjern fordelingen først, så kan den lagres som noe annet.');
+            notify('Innbetalingen er fordelt på flere kjøp. Fjern fordelingen først, så kan den lagres som noe annet.');
             return;
         }
         setSaving(true);
@@ -441,7 +443,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             advance([tx.id]);
         } catch (error) {
             console.error('Failed to save transaction', error);
-            alert(error?.message || 'Kunne ikke lagre.');
+            notify({ message: error?.message || 'Kunne ikke lagre.', variant: 'error' });
         } finally {
             setSaving(false);
         }
@@ -463,13 +465,17 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
 
     const handleUnlinkRefund = async (row) => {
         const isSplit = !!(row.refundParentId || row.refundSplit);
-        if (!window.confirm(isSplit
-            ? 'Denne innbetalingen er fordelt på flere kjøp. Fjerne hele fordelingen? Innbetalingen blir uavstemt igjen. Skjer med en gang.'
-            : 'Fjerne koblingen? Innbetalingen blir uavstemt igjen. Skjer med en gang.')) return;
+        if (!await confirm({
+            title: isSplit ? 'Fjerne hele fordelingen?' : 'Fjerne koblingen?',
+            message: isSplit
+                ? 'Denne innbetalingen er fordelt på flere kjøp. Hele fordelingen fjernes, og innbetalingen blir uavstemt igjen. Skjer med en gang.'
+                : 'Innbetalingen blir uavstemt igjen. Skjer med en gang.',
+            confirmText: 'Fjern', variant: 'danger',
+        })) return;
         try { await unlinkRefund(row.id); }
         catch (error) {
             console.error('Failed to unlink refund', error);
-            alert('Kunne ikke fjerne koblingen.');
+            notify({ message: 'Kunne ikke fjerne koblingen.', variant: 'error' });
         }
     };
 
@@ -485,7 +491,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             advance(remainingWithSuggestions.map(t => t.id));
         } catch (error) {
             console.error('Failed to bulk-accept suggestions', error);
-            alert('Kunne ikke godta alle forslagene.');
+            notify({ message: 'Kunne ikke godta alle forslagene.', variant: 'error' });
         } finally {
             setBulkSaving(false);
         }
@@ -514,6 +520,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     ].filter(Boolean);
     const showSuggestionCard = !!currentSuggestion && !storedKind && !!suggestedDefId;
     const suggestionInst = currentSuggestion ? expenses.find(e => e.id === currentSuggestion.budgetItemId) : null;
+    const suggestionDef = budgetItemDefs.find(d => d.id === suggestedDefId) || null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm" onKeyDown={onKeyDown}>
@@ -584,7 +591,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                         {showSuggestionCard && (
                             <div className="rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 p-3 flex items-center justify-between gap-3">
                                 <div className="min-w-0 text-sm">
-                                    <p className="font-medium text-purple-800 dark:text-purple-200 flex items-center gap-1.5"><Sparkles className="w-4 h-4 flex-shrink-0" />Foreslått: {suggestionInst?.category} › {suggestionInst?.name}</p>
+                                    <p className="font-medium text-purple-800 dark:text-purple-200 flex items-center gap-1.5"><Sparkles className="w-4 h-4 flex-shrink-0" />Foreslått: {suggestionDef ? `${catName(suggestionDef.categoryId)} › ${suggestionDef.name}` : `${suggestionInst?.category} › ${suggestionInst?.name}`}</p>
                                     <p className="text-xs text-purple-700 dark:text-purple-300">Tidligere avstemt som «{currentSuggestion.matchedName}»{currentSuggestion.matchType === 'similar' ? ' (lignende navn)' : ''}. Enter godtar.</p>
                                 </div>
                                 <button onClick={() => save({ kind: KIND.purchase, defId: suggestedDefId })} disabled={saving} className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 text-white text-sm font-medium rounded-lg whitespace-nowrap flex items-center gap-1.5">

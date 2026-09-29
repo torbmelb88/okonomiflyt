@@ -16,7 +16,6 @@ const NAV_GROUPS = [
     { label: 'Arbeid', items: [
         { to: '/transaksjoner', label: 'Transaksjoner' },
         { to: '/import', label: 'Import' },
-        { to: '/dagligvarer', label: 'Dagligvarer' },
     ] },
     { label: 'Resultat', items: [
         { to: '/oversikt', label: 'Min Oversikt' },
@@ -24,6 +23,7 @@ const NAV_GROUPS = [
         { to: '/budget', label: 'Budsjett' },
         { to: '/sparing', label: 'Sparing' },
         { to: '/projects', label: 'Prosjekter' },
+        { to: '/dagligvarer', label: 'Dagligvarer' },
     ] },
     { label: 'Oppsett', items: [
         { to: '/accounts', label: 'Kontoer' },
