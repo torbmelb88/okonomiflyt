@@ -13,7 +13,6 @@ import MergeTransactionsModal from './MergeTransactionsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
 import { coverGroups, COVER_STATUS_LABEL } from '../../utils/coverage';
-import { isMoneyMovement } from '../../utils/kinds';
 import { useDialog } from '../../contexts/DialogContext';
 
 /**
@@ -147,44 +146,6 @@ export default function TransactionsPanel({
         panelTransactions.some(t => t.accountId === a.id && t.month === selectedMonth)
     );
 
-    const isExcludedFromSummary = (t) => {
-        // A split refund's parent is represented by its children
-        if (t.refundSplit) return true;
-        // Pass-through money is neither income nor spending
-        if (coverGroupById.has(t.id)) return true;
-        if (isMoneyMovement(t)) return true;
-        if (t.budgetItemId) {
-            const linkedExpense = expenses.find(e => e.id === t.budgetItemId);
-            if (linkedExpense && (linkedExpense.category || '').trim().toLowerCase() === 'sparing') return true;
-        }
-        return false;
-    };
-
-    // Credit notes reduce spending rather than count as income
-    const refundTotal = displayedTransactions
-        .filter(t => t.type === 'income' && t.isRefund && !isExcludedFromSummary(t))
-        .reduce((acc, t) => acc + t.amount, 0);
-    const incomeTotal = displayedTransactions
-        .filter(t => t.type === 'income' && !t.isRefund && !isExcludedFromSummary(t))
-        .reduce((acc, t) => acc + t.amount, 0);
-    const expenseTotal = displayedTransactions
-        .filter(t => t.type === 'expense' && !isExcludedFromSummary(t))
-        .reduce((acc, t) => acc + t.amount, 0) - refundTotal;
-    const netTotal = incomeTotal - expenseTotal;
-
-    const fmtKr = (n) => `${Math.round(n).toLocaleString('no-NO')} kr`;
-    const green = 'text-green-600 dark:text-green-400';
-    const red = 'text-red-600 dark:text-red-400';
-    // One combined summary for bank + credit card. Money movement (bill
-    // payments, transfers, savings) is excluded via category, so card
-    // purchases count once and the payment of the card bill counts never.
-    const summaryHint = 'Sum av radene under, men overføringer, sparing, kortregninger og penger på gjennomreise er holdt utenfor, og returer er trukket fra «Ut».';
-    const summaryItems = [
-        { label: 'Inn', text: `+${fmtKr(incomeTotal)}`, cls: green, hint: summaryHint },
-        { label: 'Ut', text: `-${fmtKr(expenseTotal)}`, cls: red, hint: summaryHint },
-        { label: 'Netto', text: fmtKr(netTotal), cls: netTotal >= 0 ? green : red, hint: summaryHint },
-    ];
-
     // Refunded amount per original transaction, for the "returnert" badge
     const refundedByOriginal = new Map();
     for (const t of transactions) {
@@ -250,7 +211,7 @@ export default function TransactionsPanel({
 
     return (
         <div className="space-y-6">
-            {/* Month Navigation & Summary */}
+            {/* Month navigation */}
             <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                     <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
@@ -260,26 +221,9 @@ export default function TransactionsPanel({
                         <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 capitalize">{formatMonth(selectedMonth)}</h2>
                         <span className="text-sm text-gray-500 dark:text-gray-400">{displayedTransactions.length} transaksjoner</span>
                     </div>
-                    <div className="hidden md:flex items-center space-x-6">
-                        {summaryItems.map((item, i) => (
-                            <div key={item.label} className={clsx('text-right', i > 0 && 'pl-6 border-l border-gray-200 dark:border-gray-700')}>
-                                <div className="text-xs text-gray-400 uppercase tracking-wider mb-0.5" title={item.hint}>{item.label}</div>
-                                <div className={clsx('font-bold text-lg', item.cls)}>{item.text}</div>
-                            </div>
-                        ))}
-                    </div>
                     <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors ml-2">
                         <ArrowRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                     </button>
-                </div>
-                {/* Mobile summary */}
-                <div className="md:hidden grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-                    {summaryItems.map((item, i) => (
-                        <div key={item.label} className={clsx('flex flex-col items-center', i > 0 && 'border-l border-gray-200 dark:border-gray-700')}>
-                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">{item.label}</span>
-                            <span className={clsx('text-sm font-bold', item.cls)}>{item.text.replace(' kr', '')}</span>
-                        </div>
-                    ))}
                 </div>
             </div>
 
