@@ -1,13 +1,20 @@
 import { useBudget } from '../../contexts/BudgetContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { DollarSign, Users, ArrowRight, Plus, Calendar, RotateCcw, History } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { DollarSign, Users, ArrowRight, Plus, Calendar, RotateCcw, History, List } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import AddBudgetItemModal from './AddBudgetItemModal';
 import BudgetItemDetailsModal from './BudgetItemDetailsModal';
 import AnnualBudgetPlannerModal from './AnnualBudgetPlannerModal';
+import BudgetToggle from '../common/BudgetToggle';
 import { isVirtualExpense, SCOPE_LABEL } from '../../utils/categoryMigration';
+import { computeSplit, readRoundingMode } from '../../utils/settlement';
 import InfoTip from '../common/InfoTip';
 import clsx from 'clsx';
+
+const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#6b7280', '#ef4444'];
+const fmt = (n) => Math.round(n).toLocaleString('no-NO');
 
 function BudgetAmountInput({ value, onCommit, className }) {
     const [draft, setDraft] = useState(String(value));
@@ -23,24 +30,38 @@ function BudgetAmountInput({ value, onCommit, className }) {
 }
 
 /**
- * Budsjett = the plan. Budget items are auto-included from the owner-level
- * library by scope (this budget shows defs scoped to it or 'both'). The amount
- * lives on a per-budget instance (expense) that is materialized lazily the
- * first time you set an amount. Actuals/split live on Forbruk.
+ * Budsjett = plan and actual for one month, one budget, in one table:
+ * every budget item with its planned amount (editable), what was actually
+ * spent (transactions linked to it, refunds net) and the difference.
+ *
+ * Budget items are auto-included from the owner-level library by scope; the
+ * amount lives on a per-budget instance (expense) materialized lazily the
+ * first time an amount is set. Items flagged «utenfor statistikk» stay in
+ * the table (greyed) but out of the totals and the pie, so the one total
+ * here means the same as it did on the old Forbruk page.
  */
 export default function Budget() {
     const {
-        activeBudget, expenses, transactions, categories, budgetItemDefs, loading,
+        activeBudget, expenses, transactions, allTransactions, categories, budgetItemDefs, loading, accounts, allProjects, sharedBudget,
         addCategory, addBudgetItemDef, addExpense, getMonthlyBudget, setMonthlyBudget, deleteMonthlyBudget,
     } = useBudget();
+    const { currentUser } = useAuth();
 
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedBudgetItem, setSelectedBudgetItem] = useState(null);
     const [isAnnualPlannerOpen, setIsAnnualPlannerOpen] = useState(false);
+    const [pieMode, setPieMode] = useState('actual'); // 'plan' | 'actual'
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
+
+    // My share of the shared budget this month — the actual behind the
+    // virtual «Min andel felles» row on a personal budget.
+    const split = useMemo(
+        () => computeSplit({ transactions: allTransactions, sharedBudget, accounts, projects: allProjects, month: selectedMonth, userUid: currentUser?.uid, roundingMode: readRoundingMode() }),
+        [allTransactions, sharedBudget, accounts, allProjects, selectedMonth, currentUser]
+    );
 
     if (loading) return <div>Laster budsjett...</div>;
     if (!activeBudget) return <div>Ingen budsjett valgt.</div>;
@@ -63,16 +84,31 @@ export default function Budget() {
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     };
 
+    // «Utenfor statistikk» on the def or its category (Innstillinger)
+    const defExcluded = (def) => {
+        if (!def) return false;
+        if (def.excludeFromStats) return true;
+        return !!categories.find(c => c.id === def.categoryId)?.excludeFromStats;
+    };
+    const actualFor = (instId) => {
+        const linked = transactions.filter(t => t.budgetItemId === instId && t.month === selectedMonth);
+        return {
+            actual: linked.reduce((sum, t) => (t.type === 'income' ? sum - t.amount : sum + t.amount), 0),
+            count: linked.length,
+        };
+    };
+
     // Auto-included defs (by scope) -> rows, with the per-budget instance if any
     const eligibleDefs = budgetItemDefs.filter(d => d.scope === 'both' || d.scope === budgetScope);
-
     const defRows = eligibleDefs.map(def => {
         const inst = expenses.find(e => e.defId === def.id && !isVirtualExpense(e));
         const mb = inst ? getMonthlyBudget(inst.id, selectedMonth) : { amount: 0, isOverride: false };
+        const { actual, count } = inst ? actualFor(inst.id) : { actual: 0, count: 0 };
         return {
             key: `def-${def.id}`, defId: def.id, instId: inst?.id || null,
             name: def.name, category: catName(def.categoryId), scope: def.scope,
             budgetedAmount: mb.amount, isOverride: mb.isOverride, materialized: !!inst, isVirtual: false,
+            actual, count, excluded: defExcluded(def),
         };
     });
 
@@ -82,25 +118,33 @@ export default function Budget() {
     const extraRows = expenses.filter(e => !usedInstIds.has(e.id)).map(e => {
         const def = e.defId ? budgetItemDefs.find(d => d.id === e.defId) : null;
         const mb = getMonthlyBudget(e.id, selectedMonth);
+        const virtual = isVirtualExpense(e);
+        const { actual, count } = virtual ? { actual: split.userAmount, count: split.rows.length } : actualFor(e.id);
         return {
-            key: `exp-${e.id}`, defId: e.defId || null, instId: isVirtualExpense(e) ? null : e.id,
-            name: e.name, category: def ? catName(def.categoryId) : (e.category || 'Annet'), scope: def?.scope || null,
-            budgetedAmount: mb.amount, isOverride: mb.isOverride, materialized: !isVirtualExpense(e), isVirtual: isVirtualExpense(e),
+            key: `exp-${e.id}`, defId: e.defId || null, instId: virtual ? null : e.id,
+            name: e.name, category: virtual ? 'Felles' : (def ? catName(def.categoryId) : (e.category || 'Annet')), scope: def?.scope || null,
+            budgetedAmount: mb.amount, isOverride: mb.isOverride, materialized: !virtual, isVirtual: virtual,
+            actual, count, excluded: defExcluded(def),
         };
     });
 
     const rows = [...defRows, ...extraRows].sort((a, b) =>
         a.category.localeCompare(b.category, 'no-NO') || a.name.localeCompare(b.name, 'no-NO'));
+    const counted = rows.filter(r => !r.excluded);
+    const totalBudgeted = counted.reduce((sum, r) => sum + r.budgetedAmount, 0);
+    const totalActual = counted.reduce((sum, r) => sum + r.actual, 0);
+    const totalDiff = totalBudgeted - totalActual;
 
-    const totalBudgeted = rows.reduce((sum, r) => sum + r.budgetedAmount, 0);
-
-    // Plan pie by category
+    // Pie by category: plan or actual, same rows as the totals
     const byCat = {};
-    rows.forEach(r => { byCat[r.category] = (byCat[r.category] || 0) + r.budgetedAmount; });
-    const data = Object.keys(byCat)
-        .map((cat, i) => ({ name: cat, value: byCat[cat], color: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#6b7280', '#ef4444'][i % 6] }))
+    counted.forEach(r => {
+        const v = pieMode === 'plan' ? r.budgetedAmount : r.actual;
+        if (v > 0) byCat[r.category] = (byCat[r.category] || 0) + v;
+    });
+    const pieData = Object.keys(byCat)
+        .map((cat, i) => ({ name: cat, value: byCat[cat], color: cat === 'Felles' ? '#8b5cf6' : PIE_COLORS[i % PIE_COLORS.length] }))
         .filter(d => d.value > 0);
-    if (data.length === 0) data.push({ name: 'Ingen data', value: 1, color: '#e5e7eb' });
+    if (pieData.length === 0) pieData.push({ name: 'Ingen data', value: 1, color: '#e5e7eb' });
 
     const commitAmount = async (row, newAmount) => {
         if (row.isVirtual) return;
@@ -147,27 +191,19 @@ export default function Budget() {
         }
     };
 
+    const diffCls = (d) => d < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400';
+
     return (
         <div className="space-y-6">
-            {/* Month nav */}
-            <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-                    <ArrowRight className="w-5 h-5 transform rotate-180 text-gray-600 dark:text-gray-400" />
-                </button>
-                <div className="text-center">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 capitalize">{formatMonth(selectedMonth)}</h2>
-                    <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center justify-center gap-1">Planlagt budsjett: <span className="font-medium">{totalBudgeted.toLocaleString('no-NO')} kr</span>
-                        <InfoTip text="Summen av alle planlagte beløp denne måneden, inkludert den automatiske fellesandelen. Forbruk-siden kan vise en lavere sum, fordi poster merket «utenfor statistikk» ikke er med der." />
-                    </div>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div className="flex items-center gap-3">
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Budsjett</h1>
+                    <BudgetToggle />
                 </div>
-                <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-                    <ArrowRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                </button>
-            </div>
-
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Budsjett</h1>
-                <div className="flex space-x-2">
+                <div className="flex gap-2">
+                    <Link to="/transaksjoner" className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm">
+                        <List className="w-4 h-4" /><span className="hidden sm:inline">Til transaksjoner</span>
+                    </Link>
                     <button onClick={() => setIsAnnualPlannerOpen(true)} className="flex items-center justify-center w-10 h-10 bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" title="Årsplanlegger">
                         <Calendar className="w-5 h-5" />
                     </button>
@@ -178,73 +214,131 @@ export default function Budget() {
                 </div>
             </div>
 
-            {/* Plan chart */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">Budsjettfordeling (Plan)</h3>
-                <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                {data.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                            </Pie>
-                            <Tooltip formatter={(value) => `${value.toLocaleString('no-NO')} kr`} />
-                            <Legend />
-                        </PieChart>
-                    </ResponsiveContainer>
+            {/* Month nav + totals */}
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center justify-between">
+                    <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
+                        <ArrowRight className="w-5 h-5 transform rotate-180 text-gray-600 dark:text-gray-400" />
+                    </button>
+                    <div className="text-center flex-1 mx-4">
+                        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 capitalize">{formatMonth(selectedMonth)}</h2>
+                        <span className="text-sm text-gray-500 dark:text-gray-400">{activeBudget.name}</span>
+                    </div>
+                    <div className="hidden md:flex items-center space-x-6">
+                        {[
+                            { label: 'Plan', text: `${fmt(totalBudgeted)} kr`, cls: 'text-gray-900 dark:text-gray-100' },
+                            { label: 'Brukt', text: `${fmt(totalActual)} kr`, cls: 'text-gray-900 dark:text-gray-100' },
+                            { label: totalDiff < 0 ? 'Over' : 'Igjen', text: `${fmt(Math.abs(totalDiff))} kr`, cls: diffCls(totalDiff) },
+                        ].map((item, i) => (
+                            <div key={item.label} className={clsx('text-right', i > 0 && 'pl-6 border-l border-gray-200 dark:border-gray-700')}>
+                                <div className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">{item.label}</div>
+                                <div className={clsx('font-bold text-lg', item.cls)}>{item.text}</div>
+                            </div>
+                        ))}
+                        <InfoTip text="Samme rader og samme filter for alle tre tallene: poster merket «utenfor statistikk» (Innstillinger) står i tabellen, men telles ikke. Brukt = transaksjoner knyttet til postene, refusjoner trukket fra; uavstemte transaksjoner er ikke med før de er avstemt. På et privat budsjett er «Min andel felles» din andel av fellesutgiftene denne måneden, samme tall som Oppgjør." />
+                    </div>
+                    <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors ml-2">
+                        <ArrowRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                    </button>
+                </div>
+                <div className="md:hidden grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 text-center">
+                    <div><div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Plan</div><div className="text-sm font-bold text-gray-900 dark:text-gray-100">{fmt(totalBudgeted)}</div></div>
+                    <div className="border-l border-gray-200 dark:border-gray-700"><div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Brukt</div><div className="text-sm font-bold text-gray-900 dark:text-gray-100">{fmt(totalActual)}</div></div>
+                    <div className="border-l border-gray-200 dark:border-gray-700"><div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">{totalDiff < 0 ? 'Over' : 'Igjen'}</div><div className={clsx('text-sm font-bold', diffCls(totalDiff))}>{fmt(Math.abs(totalDiff))}</div></div>
                 </div>
             </div>
 
-            {/* Plan list */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-                <div className="hidden md:grid px-6 py-4 border-b border-gray-100 dark:border-gray-700 grid-cols-12 gap-2 text-sm font-bold text-gray-900 dark:text-gray-100">
-                    <div className="col-span-7">Budsjettpost</div>
-                    <div className="col-span-5 text-right">Planlagt beløp</div>
-                </div>
-                <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                    {rows.length > 0 ? rows.map((row) => (
-                        <div key={row.key}
-                            onClick={() => row.instId && setSelectedBudgetItem(expenses.find(e => e.id === row.instId))}
-                            className={clsx('px-4 md:px-6 py-4 transition-colors flex items-center justify-between', row.instId ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer' : '')}>
-                            <div className="flex items-center space-x-3 min-w-0">
-                                <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0', row.isVirtual ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600')}>
-                                    {row.isVirtual ? <Users className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
-                                </div>
-                                <div className="min-w-0">
-                                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">{row.name}</div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                        {row.category}
-                                        {row.scope === 'both' && <span className="ml-1 text-purple-500">· {SCOPE_LABEL.both}</span>}
-                                        {row.isOverride && <span className="ml-1 text-blue-500" title="Denne måneden har et eget beløp som overstyrer postens standardbeløp — pilen ved siden av setter det tilbake">· overstyrt</span>}
-                                        {!row.materialized && !row.isVirtual && <span className="ml-1 text-gray-400" title="Posten finnes i biblioteket, men er ikke tatt i bruk i dette budsjettet ennå — skriv inn et beløp for å aktivere den">· ikke satt</span>}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Table: plan / actual / diff */}
+                <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+                    <div className="hidden md:grid px-6 py-3 border-b border-gray-100 dark:border-gray-700 grid-cols-12 gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        <div className="col-span-5">Budsjettpost</div>
+                        <div className="col-span-3 text-right">Plan</div>
+                        <div className="col-span-2 text-right">Brukt</div>
+                        <div className="col-span-2 text-right">Avvik</div>
+                    </div>
+                    <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {rows.length > 0 ? rows.map((row) => {
+                            const diff = row.budgetedAmount - row.actual;
+                            return (
+                                <div key={row.key} className={clsx('px-4 md:px-6 py-3 grid grid-cols-12 gap-2 items-center', row.excluded && 'opacity-60')}>
+                                    <button
+                                        onClick={() => row.instId && setSelectedBudgetItem(expenses.find(e => e.id === row.instId))}
+                                        disabled={!row.instId}
+                                        className={clsx('col-span-12 md:col-span-5 flex items-center space-x-3 min-w-0 text-left', row.instId && 'hover:text-blue-600 dark:hover:text-blue-400')}
+                                        title={row.instId ? 'Vis transaksjonene på posten' : undefined}
+                                    >
+                                        <div className={clsx('w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0', row.isVirtual ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600')}>
+                                            {row.isVirtual ? <Users className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="font-medium text-gray-900 dark:text-gray-100 truncate">{row.name}</div>
+                                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                {row.category}
+                                                {row.count > 0 && <span> · {row.count} transaksjoner</span>}
+                                                {row.scope === 'both' && <span className="ml-1 text-purple-500">· {SCOPE_LABEL.both}</span>}
+                                                {row.isOverride && <span className="ml-1 text-blue-500" title="Denne måneden har et eget beløp som overstyrer postens standardbeløp — pilen setter det tilbake">· overstyrt</span>}
+                                                {!row.materialized && !row.isVirtual && <span className="ml-1 text-gray-400" title="Posten finnes i biblioteket, men er ikke tatt i bruk i dette budsjettet ennå — skriv inn et beløp for å aktivere den">· ikke satt</span>}
+                                                {row.excluded && <span className="ml-1 text-gray-400" title="Merket «utenfor statistikk» i Innstillinger — telles ikke i summene eller kakediagrammet">· utenfor statistikk</span>}
+                                            </div>
+                                        </div>
+                                    </button>
+                                    <div className="col-span-6 md:col-span-3 flex items-center justify-end gap-1">
+                                        {row.materialized && (
+                                            <>
+                                                <button onClick={() => handleSetToPreviousActual(row)} className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title="Sett til forrige måneds forbruk">
+                                                    <History className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button onClick={() => handleResetBudget(row)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded transition-colors" title="Tilbakestill til standard">
+                                                    <RotateCcw className="w-3.5 h-3.5" />
+                                                </button>
+                                            </>
+                                        )}
+                                        {row.isVirtual ? (
+                                            <span className="w-24 text-right font-medium text-gray-700 dark:text-gray-300 pr-2">{fmt(row.budgetedAmount)} kr</span>
+                                        ) : (
+                                            <BudgetAmountInput value={row.budgetedAmount} onCommit={(amt) => commitAmount(row, amt)} className="w-24 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded px-2 py-1 text-right text-sm" />
+                                        )}
+                                    </div>
+                                    <div className="col-span-3 md:col-span-2 text-right text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                        <span className="md:hidden text-[10px] uppercase text-gray-400 mr-1">Brukt</span>{fmt(row.actual)}
+                                    </div>
+                                    <div className={clsx('col-span-3 md:col-span-2 text-right text-sm', diffCls(diff))}>
+                                        {row.budgetedAmount === 0 && row.actual === 0 ? <span className="text-gray-300 dark:text-gray-600">–</span> : `${diff < 0 ? '−' : '+'}${fmt(Math.abs(diff))}`}
                                     </div>
                                 </div>
+                            );
+                        }) : (
+                            <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+                                Ingen budsjettposter for dette budsjettet ennå. Legg til én, eller opprett dem i Innstillinger → Kategorier &amp; budsjettposter.
                             </div>
-                            <div className="flex items-center justify-end gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                                {row.materialized && (
-                                    <>
-                                        <button onClick={() => handleSetToPreviousActual(row)} className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title="Sett til forrige måneds forbruk">
-                                            <History className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button onClick={() => handleResetBudget(row)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded transition-colors" title="Tilbakestill til standard">
-                                            <RotateCcw className="w-3.5 h-3.5" />
-                                        </button>
-                                    </>
-                                )}
-                                {row.isVirtual ? (
-                                    <span className="w-28 text-right font-medium text-gray-700 dark:text-gray-300 pr-2">{row.budgetedAmount.toLocaleString('no-NO')} kr</span>
-                                ) : (
-                                    <>
-                                        <BudgetAmountInput value={row.budgetedAmount} onCommit={(amt) => commitAmount(row, amt)} className="w-24 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded px-2 py-1 text-right" />
-                                        <span className="dark:text-gray-400 text-sm">kr</span>
-                                    </>
-                                )}
-                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Pie: plan or actual */}
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">Fordeling
+                            <InfoTip text="Gruppert etter budsjettpostens kategori. Poster med null eller negativt beløp vises ikke." />
+                        </h3>
+                        <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 text-xs font-medium">
+                            {[['actual', 'Brukt'], ['plan', 'Plan']].map(([m, label]) => (
+                                <button key={m} onClick={() => setPieMode(m)} className={clsx('px-2.5 py-1 rounded-md', pieMode === m ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700')}>{label}</button>
+                            ))}
                         </div>
-                    )) : (
-                        <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-                            Ingen budsjettposter for dette budsjettet ennå. Legg til én, eller opprett dem i Innstillinger → Kategorier &amp; budsjettposter.
-                        </div>
-                    )}
+                    </div>
+                    <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                                    {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                                </Pie>
+                                <Tooltip formatter={(value) => `${value.toLocaleString('no-NO')} kr`} />
+                                <Legend />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
                 </div>
             </div>
 

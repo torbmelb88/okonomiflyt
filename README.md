@@ -53,7 +53,7 @@ Prosjektet består av tre deler:
 
 ![Dagligvarer](docs/screenshots/dagligvarer.png)
 
-**Budsjett** – planlagte poster per måned:
+**Budsjett** – plan, faktisk og avvik per post for én måned:
 
 ![Budsjett](docs/screenshots/budsjett.png)
 

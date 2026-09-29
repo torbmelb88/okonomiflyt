@@ -3,7 +3,7 @@ import {
     Upload, ArrowDownLeft, ArrowUpRight, Edit2, Trash2, CheckCircle,
     Link2, FolderKanban, ReceiptText, ArrowRight, CreditCard,
     MessageSquare, Smartphone, Landmark, ArrowUpDown, X, Undo2, Merge, FileText,
-    ArrowLeftRight, AlertTriangle,
+    ArrowLeftRight, AlertTriangle, SlidersHorizontal, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
@@ -29,15 +29,20 @@ export default function TransactionsPanel({
     focusIds,
     focusNonce,
 }) {
+    // Household-wide: every budget's rows, with the names of budget items and
+    // projects from every budget.
     const {
-        expenses, transactions, projects, allProjects, receipts,
+        allExpenses: expenses, allTransactions: transactions, allProjects: projects, allProjects, receipts, budgets,
         deleteTransaction, deleteTransactions,
     } = useBudget();
 
     const [selectedAccount, setSelectedAccount] = useState(null);
+    const [selectedBudgetId, setSelectedBudgetId] = useState(null); // null = all budgets
     const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, id: null, type: null, count: 0 });
     const [sortBy, setSortBy] = useState('date-desc');
     const [activeFilters, setActiveFilters] = useState([]);
+    const [showMoreFilters, setShowMoreFilters] = useState(false);
+    const selectCls = 'px-3 py-1.5 rounded-lg text-sm font-medium border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500';
 
     // Reconciliation: 'queue' walks the unreconciled rows, 'edit' opens one
     const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
@@ -120,6 +125,7 @@ export default function TransactionsPanel({
         : panelTransactions
     )
         .filter(t => t.month === selectedMonth)
+        .filter(t => !selectedBudgetId || t.budgetId === selectedBudgetId)
         .filter(t => extraFilters.every(f => !activeFilters.includes(f.key) || f.test(t)))
         .sort(sortComparators[sortBy] || sortComparators['date-desc']);
 
@@ -266,89 +272,29 @@ export default function TransactionsPanel({
                 </div>
             </div>
 
-            {/* Actions + account filter */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div className="flex flex-wrap gap-2">
-                    <button
-                        onClick={() => setSelectedAccount(null)}
-                        className={clsx(
-                            'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                            !selectedAccount
-                                ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300'
-                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
-                        )}
-                    >
-                        Alle kontoer
-                    </button>
-                    {accountsWithTx.map(acc => (
-                        <button
-                            key={acc.id}
-                            onClick={() => setSelectedAccount(acc)}
-                            className={clsx(
-                                'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                                selectedAccount?.id === acc.id
-                                    ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300'
-                                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
-                            )}
-                        >
-                            {creditCardIds.has(acc.id) && <CreditCard className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />}
-                            {acc.name}
-                        </button>
-                    ))}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    <button onClick={handleDeleteAllTransactions} title="Sletter alle transaksjonene som vises akkurat nå — valgt måned, konto og filtre. Kan ikke angres." className="flex items-center space-x-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 text-red-700 font-medium shadow-sm text-sm">
-                        <Trash2 className="w-4 h-4" />
-                        <span>Slett alle</span>
-                    </button>
-                    <button onClick={handleManualReconcile} className="flex items-center space-x-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 text-blue-700 font-medium shadow-sm text-sm">
-                        <CheckCircle className="w-4 h-4" />
-                        <span>Avstem</span>
-                    </button>
-                </div>
-            </div>
-
-            {/* Sort + extra filters */}
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    {filterGroups.map(g => (
-                        <div key={g.label} className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">{g.label}</span>
-                            {g.filters.map(f => (
-                                <button
-                                    key={f.key}
-                                    onClick={() => toggleFilter(f.key)}
-                                    title={f.hint}
-                                    className={clsx(
-                                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                                        activeFilters.includes(f.key)
-                                            ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300'
-                                            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
-                                    )}
-                                >
-                                    {f.Icon && <f.Icon className="w-3.5 h-3.5" />}
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-                    ))}
-                    {activeFilters.length > 0 && (
-                        <button
-                            onClick={() => setActiveFilters([])}
-                            className="inline-flex items-center gap-1 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                            Nullstill
-                        </button>
+            {/* Filter bar: what to show, in one row; the chip groups behind «Flere filtre» */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                    {budgets.length > 1 && (
+                        <select value={selectedBudgetId || ''} onChange={(e) => setSelectedBudgetId(e.target.value || null)} className={selectCls} title="Budsjett">
+                            <option value="">Alle budsjetter</option>
+                            {budgets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
                     )}
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    <ArrowUpDown className="w-4 h-4 text-gray-400" />
-                    <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
+                    <select value={selectedAccount?.id || ''} onChange={(e) => setSelectedAccount(accounts.find(a => a.id === e.target.value) || null)} className={selectCls} title="Konto">
+                        <option value="">Alle kontoer</option>
+                        {accountsWithTx.some(a => !creditCardIds.has(a.id)) && (
+                            <optgroup label="Bankkontoer">
+                                {accountsWithTx.filter(a => !creditCardIds.has(a.id)).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </optgroup>
+                        )}
+                        {accountsWithTx.some(a => creditCardIds.has(a.id)) && (
+                            <optgroup label="Kredittkort">
+                                {accountsWithTx.filter(a => creditCardIds.has(a.id)).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </optgroup>
+                        )}
+                    </select>
+                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={selectCls} title="Sortering">
                         <option value="date-desc">Dato (nyeste først)</option>
                         <option value="date-asc">Dato (eldste først)</option>
                         <option value="amount-desc">Beløp (høyest først)</option>
@@ -356,16 +302,69 @@ export default function TransactionsPanel({
                         <option value="name-asc">Navn (A–Å)</option>
                         <option value="account-asc">Konto (A–Å)</option>
                     </select>
+                    <button
+                        onClick={() => setShowMoreFilters(v => !v)}
+                        className={clsx(
+                            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+                            showMoreFilters || activeFilters.length > 0
+                                ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300'
+                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                        )}
+                    >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                        Flere filtre
+                        {activeFilters.length > 0 && <span className="ml-0.5 px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold">{activeFilters.length}</span>}
+                        {showMoreFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                    {activeFilters.length > 0 && (
+                        <button onClick={() => setActiveFilters([])} className="inline-flex items-center gap-1 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
+                            <X className="w-3.5 h-3.5" />Nullstill
+                        </button>
+                    )}
                 </div>
+                {showMoreFilters && (
+                    <div className="flex flex-wrap items-start gap-x-6 gap-y-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        {filterGroups.map(g => (
+                            <div key={g.label} className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold w-full sm:w-auto">{g.label}</span>
+                                {g.filters.map(f => (
+                                    <button
+                                        key={f.key}
+                                        onClick={() => toggleFilter(f.key)}
+                                        title={f.hint}
+                                        className={clsx(
+                                            'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium border transition-colors',
+                                            activeFilters.includes(f.key)
+                                                ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300'
+                                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                                        )}
+                                    >
+                                        {f.Icon && <f.Icon className="w-3.5 h-3.5" />}
+                                        {f.label}
+                                    </button>
+                                ))}
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
-            {/* Transaction list */}
+            {/* Transaction list, with the actions that act on what is shown */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                    <h2 className="font-bold text-gray-900 dark:text-gray-100">
-                        {selectedAccount ? `Transaksjoner: ${selectedAccount.name}` : 'Alle Transaksjoner'}
-                    </h2>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">{displayedTransactions.length} transaksjoner</span>
+                <div className="px-4 md:px-6 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <h2 className="font-bold text-gray-900 dark:text-gray-100 truncate">{selectedAccount ? selectedAccount.name : 'Alle transaksjoner'}</h2>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{displayedTransactions.length} transaksjoner{activeFilters.length > 0 || selectedBudgetId ? ' (filtrert)' : ''}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <button onClick={handleManualReconcile} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm text-sm" title="Gå gjennom de uavstemte radene som vises">
+                            <CheckCircle className="w-4 h-4" />
+                            <span>Avstem</span>
+                        </button>
+                        <button onClick={handleDeleteAllTransactions} title="Slett alle transaksjonene som vises akkurat nå — valgt måned, budsjett, konto og filtre. Kan ikke angres." className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
                 <div className="divide-y divide-gray-100 dark:divide-gray-700">
                     {displayedTransactions.length > 0 ? (

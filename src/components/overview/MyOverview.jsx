@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useBudget } from '../../contexts/BudgetContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { api } from '../../services/firebase';
 import { ArrowRight, Wallet, CreditCard, PiggyBank, Calculator, Info, Landmark, Pencil, Check, X } from 'lucide-react';
 import { resolveSalary, resolveSavings, parseAmount2, SALARY_SOURCE_LABEL, SAVINGS_SOURCE_LABEL } from '../../utils/provisional';
 import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
@@ -11,11 +10,18 @@ import BufferCard from '../oppgjor/BufferCard';
 import InfoTip from '../common/InfoTip';
 import { refundStatus } from '../../utils/refunds';
 import { coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
-import { isExcludedFromSplit, heldOutOfTransfer, coveredByAccountOf } from '../../utils/settlement';
+import { heldOutOfTransfer, coveredByAccountOf, computeSplit, readRoundingMode } from '../../utils/settlement';
 import { isMoneyMovement, isSalary } from '../../utils/kinds';
 
 export default function MyOverview() {
-    const { activeBudget, budgets, transactions, accounts, allProjects, isMonthReconciled, updateBudget } = useBudget();
+    // Always MY personal budget — this page does not follow the plan-budget
+    // toggle. `activeBudget` is kept as the local name for it.
+    const { personalBudget, sharedBudget, allTransactions, accounts, allProjects, isMonthReconciled, updateBudget } = useBudget();
+    const activeBudget = personalBudget;
+    const transactions = useMemo(
+        () => allTransactions.filter(t => t.budgetId === activeBudget?.id),
+        [allTransactions, activeBudget]
+    );
     // Provisional salary / savings for the shown month (utils/provisional.js):
     // which line is being edited ('salary' | 'savings' | null) and its input.
     const [editing, setEditing] = useState(null);
@@ -29,8 +35,6 @@ export default function MyOverview() {
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
 
-    const [sharedShareAmount, setSharedShareAmount] = useState(0);
-    const [loadingShared, setLoadingShared] = useState(false);
 
     // Helpers
     const formatMonth = (monthStr) => {
@@ -103,89 +107,14 @@ export default function MyOverview() {
             ? <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-bold uppercase tracking-wider">Anslag</span>
             : null;
 
-    // 1. Joint Budget Share (ACTUALS from Prev Month)
+    // 1. Joint budget share: my part of LAST month's shared spending — the
+    // same computation Oppgjør shows (utils/settlement.js computeSplit).
     const prevMonthStr = getPreviousMonth(selectedMonth);
-
-    useEffect(() => {
-        if (!activeBudget || activeBudget.type !== 'personal') return;
-
-        const calculateSharedShare = async () => {
-            const sharedBudget = budgets.find(b => b.type === 'shared');
-            if (!sharedBudget || !currentUser) {
-                setSharedShareAmount(0);
-                return;
-            }
-
-            setLoadingShared(true);
-            try {
-                // Fetch ALL transactions
-                const allTransactions = await api.getCollection('transactions');
-
-                // Filter for Shared Budget + Previous Month. Only linked
-                // transactions enter the split (matching Oppgjor.jsx), and
-                // rows held out by their own flag, their project or their
-                // account stay out (utils/settlement.js).
-                const covering = coveringIncomeIds(allTransactions);
-                const monthTransactions = allTransactions.filter(t =>
-                    t.budgetId === sharedBudget.id &&
-                    t.month === prevMonthStr &&
-                    !isExcludedFromSplit(t, accounts, allProjects) &&
-                    !isCoverNeutral(t, covering) // pass-through money, same as Oppgjør
-                );
-
-                // Income-type transactions (refunds) reduce the settlement.
-                const signedAmount = (t) => (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0);
-                const totalSharedActual = monthTransactions.reduce((sum, t) => sum + signedAmount(t), 0);
-
-                // Outlays paid with my private money: already paid, so they
-                // are deducted from my transfer (mirrors Budget.jsx)
-                const utleggSelf = monthTransactions
-                    .filter((t) => t.paidPrivatelyBy === 'self')
-                    .reduce((sum, t) => sum + signedAmount(t), 0);
-
-                // Calculate Split Ratio
-                let userShare = 0.5;
-                const method = sharedBudget.splitMethod || 'income';
-
-                if (method === '5050') {
-                    userShare = 0.5;
-                } else if (method === 'custom') {
-                    userShare = (sharedBudget.customUserShare || 50) / 100;
-                } else { // 'income' based
-                    const totalIncome = sharedBudget.members?.reduce((sum, m) => sum + (m.income || 0), 0) || 0;
-                    const currentUserMember = sharedBudget.members?.find(m => m.uid === currentUser.uid);
-                    const currentUserIncome = currentUserMember ? (currentUserMember.income || 0) : 0;
-
-                    if (totalIncome > 0) {
-                        userShare = currentUserIncome / totalIncome;
-                    } else {
-                        userShare = 0.5;
-                    }
-                }
-
-                // Calculate Raw Amount
-                const rawUserAmount = totalSharedActual * userShare - utleggSelf;
-
-                // Apply Rounding (Read from localStorage)
-                const roundingMode = parseInt(localStorage.getItem('roundingMode') || '1');
-                let finalAmount = 0;
-
-                if (roundingMode > 1) {
-                    finalAmount = Math.ceil(rawUserAmount / roundingMode) * roundingMode;
-                } else {
-                    finalAmount = Math.round(rawUserAmount);
-                }
-
-                setSharedShareAmount(finalAmount);
-            } catch (error) {
-                console.error("Failed to calc shared actuals", error);
-                setSharedShareAmount(0);
-            } finally {
-                setLoadingShared(false);
-            }
-        };
-        calculateSharedShare();
-    }, [activeBudget, budgets, prevMonthStr, currentUser, accounts, allProjects]);
+    const split = useMemo(
+        () => computeSplit({ transactions: allTransactions, sharedBudget, accounts, projects: allProjects, month: prevMonthStr, userUid: currentUser?.uid, roundingMode: readRoundingMode() }),
+        [allTransactions, sharedBudget, accounts, allProjects, prevMonthStr, currentUser]
+    );
+    const sharedShareAmount = split.userAmount;
 
     // Pass-through money (utils/coverage.js): a transfer funded by an incoming
     // payment, and that payment, are nobody's consumption — out of every sum.
@@ -215,12 +144,11 @@ export default function MyOverview() {
     // Buffer build-up on the shared bill account (plan made on Oppgjør): my
     // equal share of the monthly extra rides on top of the settlement transfer.
     const bufferContribution = useMemo(() => {
-        const sharedBudget = budgets.find(b => b.type === 'shared');
         if (!sharedBudget) return 0;
         const parties = sharedBudget.members?.length || 2;
         const bufferAccounts = accounts.filter(a => a.isBillAccount && a.bufferTarget > 0 && (a.defaultBudgetId || a.budgetId) === sharedBudget.id);
         return totalBufferContributionPerParty(bufferAccounts, prevMonthStr, parties);
-    }, [budgets, accounts, prevMonthStr]);
+    }, [sharedBudget, accounts, prevMonthStr]);
 
     const totalToJointAccount = sharedShareAmount + creditCardUsage + bufferContribution;
 
@@ -312,14 +240,12 @@ export default function MyOverview() {
     }, [transactions, selectedMonth]);
 
     // --- RENDER ---
-    if (!activeBudget) return null;
-
-    if (activeBudget.type !== 'personal') {
+    if (!activeBudget) {
         return (
             <div className="flex flex-col items-center justify-center p-12 text-center h-[50vh]">
                 <Wallet className="w-16 h-16 text-gray-300 mb-4" />
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Min Oversikt er kun for private budsjett</h2>
-                <p className="text-gray-500 max-w-md mt-2">Denne oversikten er laget for å hjelpe deg med din private økonomi og overføringer til felleskonto.</p>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Du har ikke et privat budsjett ennå</h2>
+                <p className="text-gray-500 max-w-md mt-2">Min Oversikt viser din private økonomi og overføringene til felleskonto. Opprett et privat budsjett under Innstillinger.</p>
             </div>
         );
     }
@@ -407,7 +333,7 @@ export default function MyOverview() {
                                         <InfoTip text="Din andel av forrige måneds fellesutgifter etter fordelingsnøkkelen, minus utlegg du har lagt ut. Samme tall som «Du betaler» på Oppgjør. Uavstemte kjøp teller ikke — de må knyttes til en budsjettpost først." />
                                     </span>
                                     <span className="font-medium text-gray-900 dark:text-white">
-                                        {loadingShared ? '...' : sharedShareAmount.toLocaleString('no-NO')} kr
+                                        {sharedShareAmount.toLocaleString('no-NO')} kr
                                     </span>
                                 </div>
                                 <div className="flex justify-between text-sm">

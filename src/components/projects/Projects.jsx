@@ -37,7 +37,7 @@ const groupByMonth = (txns) => {
 };
 
 export default function Projects() {
-    const { projects, addProject, updateProject, deleteProject, budgets, accounts, activeBudget } = useBudget();
+    const { allProjects: projects, addProject, updateProject, deleteProject, budgets, accounts, personalBudget } = useBudget();
 
     const [expandedId, setExpandedId] = useState(null);
     const [loadedTxns, setLoadedTxns] = useState({});
@@ -204,15 +204,13 @@ export default function Projects() {
                     <FolderKanban className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Prosjekter</h1>
-                        {activeBudget && (
-                            <p className="text-sm text-gray-500 dark:text-gray-400">{activeBudget.name}</p>
-                        )}
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Alle budsjetter — kjøp telles uansett måned og budsjett</p>
                     </div>
                 </div>
                 {!isCreating && !editingId && (
                     <button
                         onClick={() => {
-                            setForm({ ...emptyForm, budgetId: activeBudget?.id || '' });
+                            setForm({ ...emptyForm, budgetId: personalBudget?.id || budgets[0]?.id || '' });
                             setIsCreating(true);
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
@@ -241,7 +239,7 @@ export default function Projects() {
             {projects.length === 0 && !isCreating && (
                 <div className="text-center py-16 text-gray-400 dark:text-gray-500">
                     <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-40" />
-                    <p className="text-lg font-medium">Ingen prosjekter i dette budsjettet</p>
+                    <p className="text-lg font-medium">Ingen prosjekter ennå</p>
                     <p className="text-sm mt-1">Opprett et prosjekt for å samle relaterte transaksjoner, f.eks. en oppussing eller ferie.</p>
                 </div>
             )}

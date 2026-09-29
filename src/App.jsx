@@ -4,11 +4,9 @@ import { BudgetProvider } from './contexts/BudgetContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Layout from './components/layout/Layout';
 
-// import Dashboard from './components/dashboard/Dashboard'; // Removed
 import Settings from './components/settings/Settings';
 import Accounts from './components/accounts/Accounts';
 import Budget from './components/budget/Budget';
-import Forbruk from './components/forbruk/Forbruk';
 import Transactions from './components/transactions/Transactions';
 import ImportPage from './components/import/ImportPage';
 import Sparing from './components/sparing/Sparing';
@@ -59,11 +57,11 @@ function App() {
                   <Layout />
                 </PrivateRoute>
               }>
-                <Route index element={<Navigate to="/budget" replace />} />
+                <Route index element={<Navigate to="/transaksjoner" replace />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="accounts" element={<Accounts />} />
                 <Route path="budget" element={<Budget />} />
-                <Route path="forbruk" element={<Forbruk />} />
+                <Route path="forbruk" element={<Navigate to="/budget" replace />} />
                 <Route path="transaksjoner" element={<Transactions />} />
                 <Route path="import" element={<ImportPage />} />
                 <Route path="sparing" element={<Sparing />} />

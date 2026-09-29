@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react';
 import { Users, Save, DollarSign, Calculator, Percent, Coins } from 'lucide-react';
 import InfoTip from '../common/InfoTip';
 
-export default function PartnerSettings() {
-    const { activeBudget, updateBudget, currentUser, loading } = useBudget();
+export default function PartnerSettings({ budget }) {
+    const { updateBudget, currentUser, loading } = useBudget();
 
     // State
     const [myIncome, setMyIncome] = useState('');
@@ -17,15 +17,15 @@ export default function PartnerSettings() {
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-        if (activeBudget && activeBudget.type === 'shared') {
+        if (budget && budget.type === 'shared') {
             // My details
-            const myMember = activeBudget.members.find(m => m.uid === currentUser?.uid);
+            const myMember = budget.members.find(m => m.uid === currentUser?.uid);
             if (myMember) {
                 setMyIncome(myMember.income || '');
             }
 
             // Partner details
-            const partner = activeBudget.members.find(m => m.uid !== currentUser?.uid);
+            const partner = budget.members.find(m => m.uid !== currentUser?.uid);
             if (partner) {
                 setPartnerName(partner.name || '');
                 setPartnerIncome(partner.income || '');
@@ -33,13 +33,13 @@ export default function PartnerSettings() {
             }
 
             // Budget settings
-            setSplitMethod(activeBudget.splitMethod || 'income');
-            setCustomUserShare(activeBudget.customUserShare || 50);
+            setSplitMethod(budget.splitMethod || 'income');
+            setCustomUserShare(budget.customUserShare || 50);
         }
-    }, [activeBudget, currentUser]);
+    }, [budget, currentUser]);
 
     if (loading) return <div>Laster...</div>;
-    if (!activeBudget || activeBudget.type !== 'shared') {
+    if (!budget || budget.type !== 'shared') {
         return (
             <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                 Disse innstillingene gjelder kun for fellesbudsjett.
@@ -52,7 +52,7 @@ export default function PartnerSettings() {
         setSaving(true);
         try {
             // 1. Construct updated members array
-            const updatedMembers = activeBudget.members.map(m => {
+            const updatedMembers = budget.members.map(m => {
                 if (m.uid === currentUser.uid) {
                     return { ...m, income: Number(myIncome) };
                 } else {
@@ -86,7 +86,7 @@ export default function PartnerSettings() {
 
             localStorage.setItem('roundingMode', String(roundingMode));
 
-            await updateBudget(activeBudget.id, updateData);
+            await updateBudget(budget.id, updateData);
             alert('Innstillinger lagret!');
         } catch (error) {
             console.error("Failed to save settings:", error);

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { PiggyBank, TrendingUp, Loader2, Users, Wallet } from 'lucide-react';
+import { useMemo } from 'react';
+import { PiggyBank, TrendingUp } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
-import { api } from '../../services/firebase';
 import InfoTip from '../common/InfoTip';
+import BudgetToggle from '../common/BudgetToggle';
 
 const datesClose = (d1, d2, tol = 4) => Math.ceil(Math.abs(new Date(d2) - new Date(d1)) / 86400000) <= tol;
 
@@ -12,33 +12,19 @@ const formatMonth = (m) => {
 };
 
 /**
- * Sparing = savings overview for the ACTIVE budget: the savings accounts
- * whose default budget is the one selected in the header (accounts without
- * a budget show in every budget, like legacy projects). Shows current
- * balance (from the sb1Accounts snapshot) and contributions over time —
- * incoming transfers detected by pairing an incoming on a savings account
- * with an outgoing of the same amount on another account. The pairing looks
- * at every transaction, since the outgoing leg may sit in another budget.
+ * Sparing = savings over time for the chosen budget's savings accounts
+ * (accounts without a default budget show in every budget). Current balance
+ * from the sb1Accounts snapshot, and contributions detected by pairing an
+ * incoming on a savings account with an outgoing of the same amount on
+ * another account. The pairing looks at every transaction, since the
+ * outgoing leg may sit in another budget. This is history and balances —
+ * this month's savings transfer lives on Min Oversikt.
  */
 export default function Sparing() {
-    const { accounts, activeBudget, bankBalances, loading } = useBudget();
-    const [allTx, setAllTx] = useState(null);
-
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const t = await api.getCollection('transactions');
-                if (!cancelled) setAllTx(t);
-            } catch {
-                if (!cancelled) setAllTx([]);
-            }
-        })();
-        return () => { cancelled = true; };
-    }, []);
+    const { accounts, activeBudget, bankBalances, allTransactions, loading } = useBudget();
 
     const items = useMemo(() => {
-        if (!allTx || !activeBudget) return [];
+        if (!activeBudget) return [];
         const balanceFor = (a) => a.sb1AccountKey ? bankBalances.find(b => b.sb1AccountKey === a.sb1AccountKey) : null;
         const inBudget = (a) => {
             const id = a.defaultBudgetId || a.budgetId;
@@ -46,8 +32,8 @@ export default function Sparing() {
         };
 
         return accounts.filter(a => a.type === 'Sparing' && inBudget(a)).map(acc => {
-            const incoming = allTx.filter(t => t.accountId === acc.id && t.type === 'income');
-            const contributions = incoming.filter(inc => allTx.some(t =>
+            const incoming = allTransactions.filter(t => t.accountId === acc.id && t.type === 'income');
+            const contributions = incoming.filter(inc => allTransactions.some(t =>
                 t.accountId !== acc.id && t.type === 'expense' &&
                 Math.abs((t.amount || 0) - (inc.amount || 0)) < 0.01 &&
                 t.date && datesClose(t.date, inc.date)
@@ -60,28 +46,27 @@ export default function Sparing() {
                 months: Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0])),
             };
         });
-    }, [allTx, accounts, activeBudget, bankBalances]);
+    }, [allTransactions, accounts, activeBudget, bankBalances]);
 
     if (loading) return <div>Laster sparing...</div>;
     if (!activeBudget) return <div>Ingen budsjett valgt.</div>;
 
-    const isShared = activeBudget.type === 'shared';
     const totalBalance = items.reduce((s, p) => s + (typeof p.bal?.balance === 'number' ? p.bal.balance : 0), 0);
     const totalContributed = items.reduce((s, p) => s + p.total, 0);
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                    <PiggyBank className="w-6 h-6 text-green-600 dark:text-green-400" />
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                        <PiggyBank className="w-6 h-6 text-green-600 dark:text-green-400" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Sparing</h1>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Saldo og innskudd over tid per sparekonto. Denne månedens sparing står på Min Oversikt.</p>
+                    </div>
                 </div>
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Sparing</h1>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                        {isShared ? <Users className="w-4 h-4 text-purple-500" /> : <Wallet className="w-4 h-4 text-blue-500" />}
-                        Sparekontoer i {activeBudget.name} — bytt budsjett øverst for å se de andre.
-                    </p>
-                </div>
+                <BudgetToggle />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -92,16 +77,14 @@ export default function Sparing() {
                     <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{Math.round(totalBalance).toLocaleString('no-NO')} kr</div>
                 </div>
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                    <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1"><TrendingUp className="w-4 h-4" /> Innskutt (registrerte bidrag)
+                    <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1"><TrendingUp className="w-4 h-4" /> Innskutt over tid
                         <InfoTip text="Bare overføringer appen klarte å pare: en innbetaling på sparekontoen med et likt uttak fra en annen konto innen fire dager. Renter og innskudd uten motpost telles ikke." />
                     </div>
                     <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{Math.round(totalContributed).toLocaleString('no-NO')} kr</div>
                 </div>
             </div>
 
-            {allTx === null ? (
-                <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 py-6 justify-center"><Loader2 className="w-5 h-5 animate-spin" /> Beregner bidrag…</div>
-            ) : items.length === 0 ? (
+            {items.length === 0 ? (
                 <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 px-6 py-10 text-center text-gray-500 dark:text-gray-400">
                     Ingen sparekontoer i {activeBudget.name} ennå. Sett en konto til type «Sparing» med dette budsjettet som standard (eller importer den fra banken).
                 </div>

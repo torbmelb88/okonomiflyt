@@ -11,11 +11,11 @@ import { coverIssues } from '../../utils/coverage';
  * complete list (bank + credit card in one view) plus the two-state banner:
  * everything reconciled, or transactions still needing follow-up.
  *
- * Getting transactions in happens on the Import page; the spending statistics
- * (budget-vs-actual, pie) live on the Forbruk page.
+ * Household-wide: every budget's rows. Getting transactions in happens on
+ * the Import page; plan vs. actual lives on the Budsjett page.
  */
 export default function Transactions() {
-    const { activeBudget, transactions, accounts, loading } = useBudget();
+    const { allTransactions: transactions, accounts, loading, isMonthReconciled } = useBudget();
 
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
@@ -25,7 +25,6 @@ export default function Transactions() {
     const [focusNonce, setFocusNonce] = useState(0);
 
     if (loading) return <div>Laster transaksjoner...</div>;
-    if (!activeBudget) return <div>Ingen budsjett valgt.</div>;
 
     const formatMonth = (monthStr) => {
         const [year, month] = monthStr.split('-');
@@ -43,11 +42,15 @@ export default function Transactions() {
     // reconcile state — such a row may well be «avstemt» as Sparing.
     const coverProblems = coverIssues(transactions, selectedMonth);
     const coverProblemRows = coverProblems.flatMap(g => g.expenses);
+    const monthReconciled = isMonthReconciled(selectedMonth);
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Transaksjoner</h1>
+            <div className="flex items-center justify-between gap-3">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Transaksjoner</h1>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Alle kontoer og budsjetter i ett. Her gjøres arbeidet; resultatet står på Min Oversikt, Oppgjør og Budsjett.</p>
+                </div>
                 <Link to="/import" className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm">
                     <Download className="w-4 h-4" />
                     <span>Til import</span>
@@ -85,6 +88,11 @@ export default function Transactions() {
                                 {bookedCount} {bookedCount === 1 ? 'bokført transaksjon venter' : 'bokførte transaksjoner venter'} på avstemming mot banken — beløpene bekreftes ved neste bankimport.
                             </div>
                         )}
+                        <div className="text-sm text-green-700 dark:text-green-300">
+                            {monthReconciled
+                                ? 'Måneden er markert som avstemt på Oppgjør.'
+                                : <>Måneden er ikke markert som avstemt ennå — gjør det på <Link to="/oppgjor" className="underline">Oppgjør</Link> når overføringene er gjort.</>}
+                        </div>
                     </div>
                 </div>
             )}

@@ -14,14 +14,33 @@ export function useBudget() {
 export function BudgetProvider({ children }) {
     const { currentUser } = useAuth();
     const [budgets, setBudgets] = useState([]);
-    const [activeBudgetId, setActiveBudgetId] = useState(null);
+    // The «plan» budget: the one Budsjett and Sparing show. It is a filter on
+    // those pages, not a global mode — everything else is household-wide or
+    // picks its budget itself (Min Oversikt = my personal budget, Oppgjør =
+    // the shared one). Remembered across reloads.
+    const [activeBudgetId, setActiveBudgetIdState] = useState(() => {
+        try { return localStorage.getItem('activeBudgetId') || null; } catch { return null; }
+    });
+    const setActiveBudgetId = (next) => {
+        setActiveBudgetIdState(prev => {
+            const value = typeof next === 'function' ? next(prev) : next;
+            try { if (value) localStorage.setItem('activeBudgetId', value); } catch { /* private mode */ }
+            return value;
+        });
+    };
     const [activeBudget, setActiveBudget] = useState(null);
 
     // Data associated with active budget
     const [accounts, setAccounts] = useState([]);
     const [expenses, setExpenses] = useState([]);
-    const [transactions, setTransactions] = useState([]); // Moved to top
+    // Every budget's instances — the transaction list spans budgets and needs
+    // the names of the budget items rows are linked to.
+    const [allExpenses, setAllExpenses] = useState([]);
+    // Every transaction in the household. `transactions` below is the
+    // active-budget slice for the plan pages.
+    const [allTransactions, setTransactions] = useState([]);
     const [monthlyBudgets, setMonthlyBudgets] = useState([]);
+    // Household-global: one doc per month, whichever budget wrote it.
     const [monthStatuses, setMonthStatuses] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -48,7 +67,13 @@ export function BudgetProvider({ children }) {
                 setBudgets(allBudgets);
 
                 if (allBudgets.length > 0) {
-                    setActiveBudgetId(prev => prev || allBudgets[0].id);
+                    // Keep the remembered one if it still exists, else my own
+                    // personal budget, else whatever comes first.
+                    setActiveBudgetId(prev => {
+                        if (prev && allBudgets.some(b => b.id === prev)) return prev;
+                        const mine = allBudgets.find(b => b.type === 'personal' && b.ownerId === currentUser.uid);
+                        return mine?.id || allBudgets[0].id;
+                    });
                 }
             } catch (error) {
                 console.error("Failed to load budgets", error);
@@ -66,7 +91,7 @@ export function BudgetProvider({ children }) {
             setActiveBudget(null);
             setAccounts([]);
             setExpenses([]);
-            setTransactions([]); // Reset transactions
+            setAllExpenses([]);
             setMonthlyBudgets([]);
             setMonthStatuses([]);
             return;
@@ -91,11 +116,13 @@ export function BudgetProvider({ children }) {
                 // defaultBudgetId and overridable at reconciliation.
                 setAccounts(allAccounts);
 
-                const budgetExpenses = allExpenses.filter(e => e.budgetId === activeBudgetId);
-                setExpenses(budgetExpenses);
+                setAllExpenses(allExpenses);
+                setExpenses(allExpenses.filter(e => e.budgetId === activeBudgetId));
 
                 setMonthlyBudgets(allMonthlyBudgets.filter(mb => mb.budgetId === activeBudgetId));
-                setMonthStatuses(allMonthStatuses.filter(ms => ms.budgetId === activeBudgetId));
+                // Month status is household-global (see setMonthReconciled);
+                // legacy docs carry a budgetId that is ignored.
+                setMonthStatuses(allMonthStatuses);
 
             } catch (error) {
                 console.error("Failed to load budget data", error);
@@ -220,6 +247,7 @@ export function BudgetProvider({ children }) {
 
             const docRef = await api.addDocument('expenses', newExpense);
             setExpenses(prev => [...prev, { id: docRef.id, ...newExpense }]);
+            setAllExpenses(prev => [...prev, { id: docRef.id, ...newExpense }]);
             return docRef;
         } catch (error) {
             console.error("Error adding expense:", error);
@@ -245,6 +273,9 @@ export function BudgetProvider({ children }) {
             setExpenses(prev => prev.map(exp =>
                 exp.id === id ? { ...exp, ...updatedExpense } : exp
             ));
+            setAllExpenses(prev => prev.map(exp =>
+                exp.id === id ? { ...exp, ...updatedExpense } : exp
+            ));
         } catch (error) {
             console.error("Error updating expense:", error);
             throw error;
@@ -256,6 +287,7 @@ export function BudgetProvider({ children }) {
         try {
             await api.deleteDocument('expenses', id);
             setExpenses(prev => prev.filter(exp => exp.id !== id));
+            setAllExpenses(prev => prev.filter(exp => exp.id !== id));
         } catch (error) {
             console.error("Error deleting expense:", error);
             throw error;
@@ -264,25 +296,27 @@ export function BudgetProvider({ children }) {
 
     // --- Transactions Logic ---
 
-    // Load transactions when active budget changes
+    // Every transaction, loaded once per login. Switching the plan budget
+    // does not refetch — `transactions` is just a slice of this list.
     useEffect(() => {
-        if (!activeBudgetId) {
+        if (!currentUser) {
             setTransactions([]);
             return;
         }
-
         const loadTransactions = async () => {
             try {
-                const allTransactions = await api.getCollection('transactions');
-                const budgetTransactions = allTransactions.filter(t => t.budgetId === activeBudgetId);
-                setTransactions(budgetTransactions);
+                setTransactions(await api.getCollection('transactions'));
             } catch (error) {
                 console.error("Failed to load transactions", error);
             }
         };
-
         loadTransactions();
-    }, [activeBudgetId]);
+    }, [currentUser]);
+
+    const transactions = useMemo(
+        () => allTransactions.filter(t => t.budgetId === activeBudgetId),
+        [allTransactions, activeBudgetId]
+    );
 
     const addTransaction = async (transactionData) => {
         if (!activeBudgetId) return;
@@ -299,9 +333,7 @@ export function BudgetProvider({ children }) {
                 createdAt: new Date().toISOString()
             };
             const docRef = await api.addDocument('transactions', newTransaction);
-            if (budgetId === activeBudgetId) {
-                setTransactions(prev => [...prev, { id: docRef.id, ...newTransaction }]);
-            }
+            setTransactions(prev => [...prev, { id: docRef.id, ...newTransaction }]);
             return docRef.id;
         } catch (error) {
             console.error("Error adding transaction:", error);
@@ -542,7 +574,7 @@ export function BudgetProvider({ children }) {
         await api.updateDocument('transactions', incomeId, parentPatch);
         setTransactions(prev => [
             ...prev.map(t => t.id === incomeId ? { ...t, ...parentPatch } : (closed.has(t.id) ? { ...t, awaitingRefund: false } : t)),
-            ...children.filter(c => c.budgetId === activeBudgetId),
+            ...children,
         ]);
     };
 
@@ -969,6 +1001,7 @@ export function BudgetProvider({ children }) {
         if (existing) return existing.id;
         const data = { budgetId, defId: def.id, name: def.name, category: catName, amount, monthlyAmount: amount, frequency: 'monthly', createdAt: new Date().toISOString() };
         const ref = await api.addDocument('expenses', data);
+        setAllExpenses(prev => [...prev, { id: ref.id, ...data }]);
         return ref.id;
     };
 
@@ -990,9 +1023,8 @@ export function BudgetProvider({ children }) {
     }, [currentUser]);
 
     const reloadTransactions = async () => {
-        if (!activeBudgetId) return;
-        const all = await api.getCollection('transactions');
-        setTransactions(all.filter(t => t.budgetId === activeBudgetId));
+        if (!currentUser) return;
+        setTransactions(await api.getCollection('transactions'));
     };
 
     // --- Projects (global, cross-budget) ---
@@ -1166,15 +1198,26 @@ export function BudgetProvider({ children }) {
     // budgetId are shown in every budget until the user assigns them one.
     const visibleProjects = projects.filter(p => !p.budgetId || p.budgetId === activeBudgetId);
 
+    // The two budgets the household pages pick for themselves: my own
+    // personal budget (Min Oversikt) and the shared one (Oppgjør).
+    const personalBudget = budgets.find(b => b.type === 'personal' && b.ownerId === currentUser?.uid)
+        || budgets.find(b => b.type === 'personal') || null;
+    const sharedBudget = budgets.find(b => b.type === 'shared') || null;
+
     const value = useMemo(() => ({
         currentUser,
         budgets,
         activeBudget,
+        activeBudgetId,
+        personalBudget,
+        sharedBudget,
         switchBudget,
         createBudget,
         updateBudget,
         expenses,
+        allExpenses,
         transactions,
+        allTransactions,
         accounts,
         loading,
         setActiveBudget,
@@ -1236,7 +1279,7 @@ export function BudgetProvider({ children }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [
         currentUser, budgets, activeBudget, activeBudgetId,
-        expenses, transactions, accounts, loading,
+        expenses, allExpenses, transactions, allTransactions, accounts, loading,
         categories, budgetItemDefs, monthlyBudgets, monthStatuses, projects,
         receipts, receiptItemsCache, bankBalances
     ]);

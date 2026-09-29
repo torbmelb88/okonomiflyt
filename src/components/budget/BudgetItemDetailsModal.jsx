@@ -34,7 +34,7 @@ export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, se
                     <div className="grid grid-cols-2 gap-4 mb-8">
                         <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
                             <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-1">Budsjettert</p>
-                            {/* budgetedAmount is month-override-aware (set by Forbruk); amount is the base */}
+                            {/* budgetedAmount is month-override-aware (set on Budsjett); amount is the base */}
                             <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{(budgetItem.budgetedAmount ?? budgetItem.amount ?? 0).toLocaleString('no-NO')} kr</p>
                         </div>
                         <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-100 dark:border-green-800">

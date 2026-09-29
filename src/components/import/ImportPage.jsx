@@ -11,10 +11,10 @@ import TrumfInvoiceImportFlow from './TrumfInvoiceImportFlow';
  * automatic fetch from SpareBank 1 (staged by the home-server sync), and for
  * the credit cards that fall outside the bank API either the monthly invoice
  * PDF (Trumf Kredittkort) or a manual CSV. Viewing and reconciling everything
- * lives on Transaksjoner; spending statistics on Forbruk.
+ * lives on Transaksjoner; plan vs. actual on Budsjett.
  */
 export default function ImportPage() {
-    const { activeBudget, accounts, transactions, loading } = useBudget();
+    const { activeBudget, accounts, allTransactions: transactions, loading } = useBudget();
 
     const [isBankImportOpen, setIsBankImportOpen] = useState(false);
     // Fresh bank rows to walk through right after the import — the same tail

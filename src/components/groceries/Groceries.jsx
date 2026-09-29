@@ -19,7 +19,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export default function Groceries() {
     const {
         receipts, allReceiptItems, getAllReceiptItems,
-        deleteReceipt, linkReceiptToTransaction, unlinkReceipt, transactions
+        deleteReceipt, linkReceiptToTransaction, unlinkReceipt, allTransactions: transactions
     } = useBudget();
 
     const { theme } = useTheme();

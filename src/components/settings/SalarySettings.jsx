@@ -11,20 +11,20 @@ const inputCls = 'w-48 px-4 py-2 border border-gray-300 dark:border-gray-600 rou
  * and future months until a provisional amount is typed in for a month, or
  * the real transactions arrive. Renders nothing for shared budgets.
  */
-export default function SalarySettings() {
-    const { activeBudget, updateBudget } = useBudget();
+export default function SalarySettings({ budget }) {
+    const { updateBudget } = useBudget();
     const [salary, setSalary] = useState('');
     const [savings, setSavings] = useState('');
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
 
     useEffect(() => {
-        setSalary(activeBudget?.expectedSalary > 0 ? String(activeBudget.expectedSalary) : '');
-        setSavings(activeBudget?.expectedSavings > 0 ? String(activeBudget.expectedSavings) : '');
+        setSalary(budget?.expectedSalary > 0 ? String(budget.expectedSalary) : '');
+        setSavings(budget?.expectedSavings > 0 ? String(budget.expectedSavings) : '');
         setSaved(false);
-    }, [activeBudget]);
+    }, [budget]);
 
-    if (!activeBudget || activeBudget.type !== 'personal') return null;
+    if (!budget || budget.type !== 'personal') return null;
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -32,7 +32,7 @@ export default function SalarySettings() {
         try {
             const sal = parseAmount2(salary);
             const sav = parseAmount2(savings);
-            await updateBudget(activeBudget.id, {
+            await updateBudget(budget.id, {
                 expectedSalary: sal > 0 ? sal : null,
                 expectedSavings: sav > 0 ? sav : null,
             });
