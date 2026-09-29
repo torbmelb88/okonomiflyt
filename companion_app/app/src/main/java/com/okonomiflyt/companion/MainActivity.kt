@@ -212,7 +212,7 @@ fun TriggerRow(event: TriggerEvent, onRemove: () -> Unit, onClick: () -> Unit) {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("${event.amount} ${event.currency.ifEmpty { "kr" }}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(
-                    if (event.saved) "Lagret" else "Ikke lagret",
+                    if (event.saved) "Bokført" else "Ikke bokført",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (event.saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                 )

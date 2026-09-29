@@ -89,7 +89,46 @@ function coveredByAccountOf(t, projectsById) {
     return p?.excludeFromSharedCalc ? (p.coveredByAccountId || null) : null;
 }
 
-function txView(t, accountsById, expensesById, budgetsById, projectsById) {
+// Gjennomreise («dekkes av innbetaling», web: utils/coverage.js): an outgoing
+// transfer funded by an incoming payment. The expense carries
+// coveredByIncoming + coveredByTransactionIds; incomes store nothing. Groups
+// are connected components, checked by sum: 'ok' | 'missing' | 'mismatch'.
+const coverLinkIds = (t) => Array.isArray(t?.coveredByTransactionIds) ? t.coveredByTransactionIds : [];
+function coverIndex(all) {
+    const byId = new Map(all.map(t => [t.id, t]));
+    const index = new Map();
+    const seen = new Set();
+    const brief = (t) => ({ id: t.id, date: t.date, name: t.name, amount: t.amount });
+    for (const start of all) {
+        if (start.type !== 'expense' || !start.coveredByIncoming || seen.has(start.id)) continue;
+        const expenses = [], incomes = [];
+        const stack = [start];
+        seen.add(start.id);
+        while (stack.length) {
+            const t = stack.pop();
+            if (t.type === 'income') {
+                incomes.push(t);
+                for (const e of all) {
+                    if (e.type === 'expense' && e.coveredByIncoming && !seen.has(e.id) && coverLinkIds(e).includes(t.id)) { seen.add(e.id); stack.push(e); }
+                }
+            } else {
+                expenses.push(t);
+                for (const id of coverLinkIds(t)) {
+                    const inc = byId.get(id);
+                    if (inc && inc.type === 'income' && !seen.has(inc.id)) { seen.add(inc.id); stack.push(inc); }
+                }
+            }
+        }
+        const out = Math.round(expenses.reduce((a, t) => a + (parseFloat(t.amount) || 0), 0) * 100) / 100;
+        const inn = Math.round(incomes.reduce((a, t) => a + (parseFloat(t.amount) || 0), 0) * 100) / 100;
+        const status = incomes.length === 0 ? 'missing' : Math.abs(inn - out) >= 0.01 ? 'mismatch' : 'ok';
+        const group = { status, in: inn, out, expenses: expenses.map(brief), incomes: incomes.map(brief) };
+        for (const t of [...expenses, ...incomes]) index.set(t.id, group);
+    }
+    return index;
+}
+
+function txView(t, accountsById, expensesById, budgetsById, projectsById, coverById) {
     const view = {
         id: t.id,
         date: t.date,
@@ -122,6 +161,10 @@ function txView(t, accountsById, expensesById, budgetsById, projectsById) {
     if (t.projectId) { view.projectId = t.projectId; view.projectSubcategory = t.projectSubcategory || null; }
     if (t.currency && t.currency !== 'NOK') view.currency = t.currency; // amount is still in this currency (awaiting bank confirmation)
     if (t.originalAmount) { view.originalAmount = t.originalAmount; view.originalCurrency = t.originalCurrency || null; }
+    // Gjennomreise: the whole linked group (it may span months), so a
+    // «summene stemmer ikke» can be explained without opening the app.
+    const g = coverById?.get(t.id);
+    if (g) view.gjennomreise = { role: t.type === 'income' ? 'covers' : 'coveredByIncoming', ...g };
     return view;
 }
 
@@ -275,7 +318,7 @@ function buildServer() {
 
     server.registerTool('list_transactions', {
         title: 'List transactions',
-        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`excludedBy` says whether the row itself or its project holds it out; `coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. Sorted newest first.',
+        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`excludedBy` says whether the row itself or its project holds it out; `coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. `gjennomreise` (pass-through money: a transfer funded by an incoming payment) gives the whole linked group with status ok/missing/mismatch and the in/out sums. Sorted newest first.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM. Strongly recommended to limit the result.'),
             budgetId: z.string().optional(),
@@ -287,8 +330,9 @@ function buildServer() {
         },
     }, async ({ month, budgetId, accountId, search, type, onlyUnreconciled, limit }) => {
         if (month) parseMonth(month);
-        const [transactions, accounts, expenses, budgets, projects] = await Promise.all([
+        const [transactions, allTransactions, accounts, expenses, budgets, projects] = await Promise.all([
             queryEq('transactions', { month, budgetId, accountId, type }),
+            getCollection('transactions'), // cover groups span months and types
             getCollection('accounts'),
             getCollection('expenses'),
             getCollection('budgets'),
@@ -298,6 +342,7 @@ function buildServer() {
         const expensesById = new Map(expenses.map(e => [e.id, e]));
         const budgetsById = new Map(budgets.map(b => [b.id, b]));
         const projectsById = new Map(projects.map(p => [p.id, p]));
+        const coverById = coverIndex(allTransactions);
 
         let result = transactions;
         if (search) result = result.filter(t => (t.name || '').toLowerCase().includes(search.toLowerCase()));
@@ -307,7 +352,7 @@ function buildServer() {
         return ok({
             totalMatching: result.length,
             returned: capped.length,
-            transactions: capped.map(t => txView(t, accountsById, expensesById, budgetsById, projectsById)),
+            transactions: capped.map(t => txView(t, accountsById, expensesById, budgetsById, projectsById, coverById)),
         });
     });
 

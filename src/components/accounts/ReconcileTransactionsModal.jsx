@@ -262,8 +262,15 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         ...coverExpensesStored.filter(e => !coverRemove.includes(e.id)),
         ...coverAdd.map(id => allTransactions.find(t => t.id === id)).filter(Boolean),
     ];
+    // What is still missing on this row's side of the group: on the expense
+    // side the payment(s) not yet covering it, on the income side the
+    // transfer(s) it does not yet cover (e.g. the 6 kr top-up after a typo).
     const coverRemaining = coverGroup ? Math.max(0, coverGroup.out - coverGroup.in) : liveTx.amount;
+    const coverMissingOut = coverGroup ? Math.max(0, coverGroup.in - coverGroup.out) : liveTx.amount;
+    // A row whose amount is exactly what is missing goes first, then same
+    // account and nearest date.
     const rankNear = (t, targetAmount) => (a, b) =>
+        (Math.abs(a.amount - targetAmount) < 0.005 ? 0 : 1) - (Math.abs(b.amount - targetAmount) < 0.005 ? 0 : 1) ||
         (a.accountId === t.accountId ? 0 : 1) - (b.accountId === t.accountId ? 0 : 1) ||
         daysBetween(a.date, t.date) - daysBetween(b.date, t.date) ||
         Math.abs(a.amount - targetAmount) - Math.abs(b.amount - targetAmount);
@@ -279,7 +286,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         ? allTransactions
             .filter(t => t.type === 'expense' && !t.refundSplit && !coverExpensesAfter.some(e => e.id === t.id))
             .filter(matchesSearch)
-            .sort(rankNear(liveTx, liveTx.amount))
+            .sort(rankNear(liveTx, coverMissingOut || liveTx.amount))
             .slice(0, 30)
         : [];
     const stageCoverAdd = (id) => {
