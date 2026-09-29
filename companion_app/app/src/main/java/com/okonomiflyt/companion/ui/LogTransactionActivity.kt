@@ -318,9 +318,11 @@ fun LogTransactionScreen(
                 )
 
                 FieldLabel("Konto", hint = if (cardAutoMatched) "foreslått fra kortet i varselet" else null)
-                ChipRow(
-                    options = accounts.map { it.id to it.name },
+                AccountDropdown(
+                    label = "Konto",
+                    accounts = accounts,
                     selectedId = selectedAccount?.id,
+                    noneLabel = null,
                     onSelect = { id -> selectedAccount = accounts.find { it.id == id } }
                 )
 
@@ -701,14 +703,14 @@ private fun AccountDropdown(
     label: String,
     accounts: List<Account>,
     selectedId: String?,
-    noneLabel: String,
+    noneLabel: String?,
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
         OutlinedTextField(
-            value = accounts.find { it.id == selectedId }?.name ?: noneLabel,
+            value = accounts.find { it.id == selectedId }?.name ?: noneLabel ?: "Velg konto",
             onValueChange = {},
             readOnly = true,
             label = { Text(label) },
@@ -716,7 +718,7 @@ private fun AccountDropdown(
             modifier = Modifier.fillMaxWidth().menuAnchor()
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text(noneLabel) }, onClick = { onSelect(null); expanded = false })
+            if (noneLabel != null) DropdownMenuItem(text = { Text(noneLabel) }, onClick = { onSelect(null); expanded = false })
             accounts.forEach { acc -> DropdownMenuItem(text = { Text(acc.name) }, onClick = { onSelect(acc.id); expanded = false }) }
         }
     }
