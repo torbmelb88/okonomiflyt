@@ -17,16 +17,15 @@
 // month: the salary is in, but the fixed savings transfer hasn't left yet.
 
 import { isCoveredExpense } from './coverage';
+import { isSalary, isSavings } from './kinds';
 
 export const currentMonth = (today = new Date()) =>
     `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
 
-const cat = (t) => (t.category || '').trim().toLowerCase();
-
-const isSalaryRow = (t, month) => t.month === month && t.type === 'income' && cat(t) === 'lønn';
+const isSalaryRow = (t, month) => t.month === month && t.type === 'income' && isSalary(t);
 // Only the outgoing leg counts; a transfer funded by incoming money
-// (barnetrygd → child's savings) is not my saving.
-const isSavingsRow = (t, month) => t.month === month && t.type === 'expense' && cat(t) === 'sparing' && !isCoveredExpense(t);
+// (barnetrygd → child's savings, gjennomreise) is not my saving.
+const isSavingsRow = (t, month) => t.month === month && t.type === 'expense' && isSavings(t) && !isCoveredExpense(t);
 
 const sumRows = (transactions, pred) =>
     (Array.isArray(transactions) ? transactions : []).filter(pred).reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);

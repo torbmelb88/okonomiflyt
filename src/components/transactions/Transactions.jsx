@@ -95,10 +95,10 @@ export default function Transactions() {
                         <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0" />
                         <div>
                             <div className="font-semibold text-red-800 dark:text-red-200">
-                                {coverProblemRows.length} {coverProblemRows.length === 1 ? 'overføring mangler' : 'overføringer mangler'} dekning
+                                Gjennomreise: {coverProblemRows.length} {coverProblemRows.length === 1 ? 'overføring mangler' : 'overføringer mangler'} innbetaling
                             </div>
                             <div className="text-sm text-red-700 dark:text-red-300">
-                                Merket «dekkes av innbetaling», men innbetalingen er ikke koblet eller summene stemmer ikke. Sjekk at pengene faktisk kom inn.
+                                Merket som gjennomreise, men innbetalingen er ikke koblet eller summene stemmer ikke. Sjekk at pengene faktisk kom inn.
                             </div>
                         </div>
                     </div>

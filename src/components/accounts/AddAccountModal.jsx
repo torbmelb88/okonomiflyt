@@ -183,8 +183,8 @@ export default function AddAccountModal({ isOpen, onClose, onSave, accountToEdit
                             className="w-4 h-4 mt-0.5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
                         />
                         <span className="text-sm text-gray-700 dark:text-gray-300">
-                            <span className="font-medium">Hold transaksjoner utenfor fordeling</span>
-                            <span className="block text-xs text-gray-500 dark:text-gray-400">Transaksjoner herfra teller ikke i fordelingen av fellesutgifter, men logges fortsatt. Nyttig for f.eks. et felleskort som fylles opp med et fast beløp (da er det påfyllet, ikke kjøpene, som fordeles).</span>
+                            <span className="font-medium">Holdes utenfor oppgjør</span>
+                            <span className="block text-xs text-gray-500 dark:text-gray-400">Transaksjoner herfra teller ikke i oppgjøret av fellesutgifter, men logges fortsatt. Nyttig for f.eks. et felleskort som fylles opp med et fast beløp (da er det påfyllet, ikke kjøpene, som fordeles).</span>
                         </span>
                     </label>
 

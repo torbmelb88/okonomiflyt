@@ -59,14 +59,12 @@ export default function Oppgjor() {
         const covering = coveringIncomeIds(allTx);
         const monthTx = allTx.filter(t => t.budgetId === sharedBudget.id && t.month === selectedMonth &&
             !isExcludedFromSplit(t, accounts, allProjects) && !isCoverNeutral(t, covering));
-        // Income-type transactions (credit notes/refunds) reduce the settlement
+        // Income-type transactions (refunds) reduce the settlement
         const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
-        const totalSharedActual = sum(monthTx.filter(t => !t.payer || t.payer === 'shared'));
-        const selfActual = sum(monthTx.filter(t => t.payer === 'self'));
-        const partnerActual = sum(monthTx.filter(t => t.payer === 'partner'));
+        const totalSharedActual = sum(monthTx);
         const utleggSelf = sum(monthTx.filter(t => t.paidPrivatelyBy === 'self'));
         const utleggPartner = sum(monthTx.filter(t => t.paidPrivatelyBy === 'partner'));
-        const totalActualConsumption = totalSharedActual + selfActual + partnerActual;
+        const totalActualConsumption = totalSharedActual;
 
         let userShare = 0.5, splitLabel = 'Basert på inntekt';
         const totalIncome = sharedBudget.members?.reduce((s, m) => s + (m.income || 0), 0) || 0;
@@ -77,8 +75,8 @@ export default function Oppgjor() {
         else { userShare = totalIncome > 0 ? userIncome / totalIncome : 0.5; }
         const partnerShare = 1 - userShare;
 
-        const rawUser = totalSharedActual * userShare + selfActual - utleggSelf;
-        const rawPartner = totalSharedActual * partnerShare + partnerActual - utleggPartner;
+        const rawUser = totalSharedActual * userShare - utleggSelf;
+        const rawPartner = totalSharedActual * partnerShare - utleggPartner;
         const userAmount = roundingMode > 1 ? Math.ceil(rawUser / roundingMode) * roundingMode : Math.round(rawUser);
         const partnerAmount = roundingMode > 1 ? Math.ceil(rawPartner / roundingMode) * roundingMode : Math.round(rawPartner);
 
@@ -108,7 +106,7 @@ export default function Oppgjor() {
         const parts = [];
         if (pending.booked > 0) parts.push(`${n(pending.booked)} er kun bokført (venter på bankmatch)`);
         if (pending.unreconciled > 0) parts.push(`${n(pending.unreconciled)} er ikke kategorisert`);
-        if (coverProblemCount > 0) parts.push(`${coverProblemCount === 1 ? '1 overføring' : `${coverProblemCount} overføringer`} mangler dekning`);
+        if (coverProblemCount > 0) parts.push(`${coverProblemCount === 1 ? '1 overføring' : `${coverProblemCount} overføringer`} på gjennomreise mangler innbetaling`);
         return parts.join(', ').replace(/, ([^,]*)$/, ' og $1');
     };
     const toggleReconciled = async () => {
@@ -184,7 +182,7 @@ export default function Oppgjor() {
                             </div>
                             <div className="flex justify-between items-center text-sm pt-4 mt-4 border-t border-gray-100 dark:border-gray-700">
                                 <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Faktisk forbruk:
-                                    <InfoTip text="Summen som faktisk fordeles mellom dere. Uavstemte kjøp og alt som er holdt utenfor fordelingen (på transaksjon, prosjekt eller konto) er ikke med, så tallet kan avvike fra Forbruk-siden." />
+                                    <InfoTip text="Summen som faktisk fordeles mellom dere. Uavstemte kjøp og alt som holdes utenfor oppgjør (på transaksjon, prosjekt eller konto) er ikke med, så tallet kan avvike fra Forbruk-siden." />
                                 </span>
                                 <span className="font-medium dark:text-gray-200">{split.totalActualConsumption.toLocaleString('no-NO', { maximumFractionDigits: 0 })} kr</span>
                             </div>
@@ -195,10 +193,10 @@ export default function Oppgjor() {
                         </div>
                     )}
 
-                    {/* Dekkes fra andre kontoer */}
+                    {/* Betales fra andre kontoer */}
                     {coveredFromList.length > 0 && (
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Dekkes fra andre kontoer</h3>
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Betales fra andre kontoer</h3>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Overfør til felles regningskonto ({formatMonth(selectedMonth)})</p>
                             <div className="space-y-3">
                                 {coveredFromList.map(g => (
@@ -231,10 +229,10 @@ export default function Oppgjor() {
                         <div className="bg-red-50 dark:bg-red-900/20 p-6 rounded-xl border border-red-200 dark:border-red-800">
                             <div className="flex items-center gap-3 mb-1">
                                 <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0" />
-                                <h3 className="text-lg font-bold text-red-800 dark:text-red-200">Dekning mangler</h3>
+                                <h3 className="text-lg font-bold text-red-800 dark:text-red-200">Gjennomreise: innbetaling mangler</h3>
                             </div>
                             <p className="text-sm text-red-700 dark:text-red-300 mb-4">
-                                Disse overføringene er merket «dekkes av innbetaling», men innbetalingen er ikke koblet eller summene stemmer ikke. Sjekk at pengene faktisk kom inn, og koble dem i avstemmingen.
+                                Disse overføringene er merket som gjennomreise, men innbetalingen er ikke koblet eller summene stemmer ikke. Sjekk at pengene faktisk kom inn, og koble dem i avstemmingen.
                             </p>
                             <div className="space-y-3">
                                 {coverProblems.map((g, i) => (

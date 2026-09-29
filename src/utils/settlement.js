@@ -12,10 +12,11 @@
 // «Dekkes fra en annen konto» follows the same two levels: the transaction's
 // `coveredByAccountId` wins, else the excluding project's.
 
+// «Holdes utenfor oppgjør» is the one wording for this, whichever level set it.
 export const EXCLUSION_LABEL = {
-    transaction: 'Ekskludert',
-    project: 'Ekskludert av prosjekt',
-    account: 'Ekskludert av kontoflagg',
+    transaction: 'Holdes utenfor oppgjør',
+    project: 'Holdes utenfor oppgjør av prosjektet',
+    account: 'Holdes utenfor oppgjør av kontoen',
 };
 
 export const projectOf = (t, projects) =>

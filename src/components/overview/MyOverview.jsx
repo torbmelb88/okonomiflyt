@@ -12,6 +12,7 @@ import InfoTip from '../common/InfoTip';
 import { refundStatus } from '../../utils/refunds';
 import { coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
 import { isExcludedFromSplit, heldOutOfTransfer, coveredByAccountOf } from '../../utils/settlement';
+import { isMoneyMovement, isSalary } from '../../utils/kinds';
 
 export default function MyOverview() {
     const { activeBudget, budgets, transactions, accounts, allProjects, isMonthReconciled, updateBudget } = useBudget();
@@ -132,16 +133,9 @@ export default function MyOverview() {
                     !isCoverNeutral(t, covering) // pass-through money, same as Oppgjør
                 );
 
-                // Calculate totals based on Payer. Income-type transactions
-                // (credit notes/refunds) reduce the settlement.
+                // Income-type transactions (refunds) reduce the settlement.
                 const signedAmount = (t) => (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0);
-                const totalSharedActual = monthTransactions
-                    .filter((t) => !t.payer || t.payer === 'shared')
-                    .reduce((sum, t) => sum + signedAmount(t), 0);
-
-                const selfActual = monthTransactions
-                    .filter((t) => t.payer === 'self')
-                    .reduce((sum, t) => sum + signedAmount(t), 0);
+                const totalSharedActual = monthTransactions.reduce((sum, t) => sum + signedAmount(t), 0);
 
                 // Outlays paid with my private money: already paid, so they
                 // are deducted from my transfer (mirrors Budget.jsx)
@@ -170,7 +164,7 @@ export default function MyOverview() {
                 }
 
                 // Calculate Raw Amount
-                const rawUserAmount = totalSharedActual * userShare + selfActual - utleggSelf;
+                const rawUserAmount = totalSharedActual * userShare - utleggSelf;
 
                 // Apply Rounding (Read from localStorage)
                 const roundingMode = parseInt(localStorage.getItem('roundingMode') || '1');
@@ -253,8 +247,6 @@ export default function MyOverview() {
         if (!activeBudget || activeBudget.type !== 'personal') return 0;
         if (!Array.isArray(transactions) || billAccounts.length === 0) return 0;
         const billIds = new Set(billAccounts.map(a => a.id));
-        const isMoneyMovement = (t) => ['kredittkortregning', 'sparing', 'overføring', 'intern overføring']
-            .includes((t.category || '').trim().toLowerCase());
         return transactions
             .filter(t => {
                 if (t.month !== prevMonthStr) return false;
@@ -297,8 +289,6 @@ export default function MyOverview() {
         if (!activeBudget || activeBudget.type !== 'personal') return { spending: 0, otherIncome: 0 };
         if (!Array.isArray(transactions) || checkingAccounts.length === 0) return { spending: 0, otherIncome: 0 };
         const ids = new Set(checkingAccounts.map(a => a.id));
-        const cat = (t) => (t.category || '').trim().toLowerCase();
-        const isMoneyMovement = (t) => ['kredittkortregning', 'sparing', 'overføring', 'intern overføring'].includes(cat(t));
         let spending = 0, otherIncome = 0;
         for (const t of transactions) {
             if (t.month !== selectedMonth || !ids.has(t.accountId)) continue;
@@ -306,7 +296,7 @@ export default function MyOverview() {
             const amount = parseFloat(t.amount) || 0;
             if (t.type === 'expense') spending += amount;
             else if (t.type === 'income' && t.isRefund) spending -= amount;
-            else if (t.type === 'income' && cat(t) !== 'lønn') otherIncome += amount;
+            else if (t.type === 'income' && !isSalary(t)) otherIncome += amount;
         }
         return { spending: Math.round(spending), otherIncome: Math.round(otherIncome) };
     }, [transactions, selectedMonth, checkingAccounts, activeBudget, coveringIds, allProjects]);

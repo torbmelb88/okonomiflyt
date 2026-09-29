@@ -308,9 +308,9 @@ export default function Projects() {
                                                     </span>
                                                 )}
                                                 {project.excludeFromSharedCalc && (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300" title="Alle transaksjoner på prosjektet holdes utenfor fordelingen på Oppgjør. Er en dekningskonto valgt, vises beløpet under «Dekkes fra andre kontoer» der — penger som skal overføres fra den kontoen til felles regningskonto.">
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300" title="Alle transaksjoner på prosjektet holdes utenfor oppgjør. Er en konto valgt, vises beløpet under «Betales fra andre kontoer» på Oppgjør — penger som skal overføres fra den kontoen til felles regningskonto.">
                                                         <Ban className="w-3 h-3" />
-                                                        Utenfor fordeling{project.coveredByAccountId ? ` · dekkes fra ${accounts.find(a => a.id === project.coveredByAccountId)?.name || 'annen konto'}` : ''}
+                                                        Utenfor oppgjør{project.coveredByAccountId ? ` · betales fra ${accounts.find(a => a.id === project.coveredByAccountId)?.name || 'annen konto'}` : ''}
                                                     </span>
                                                 )}
                                             </div>
@@ -594,25 +594,25 @@ function ProjectForm({ form, setForm, onSave, onCancel, saving, title, budgets, 
                         className="w-4 h-4 mt-0.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
                     />
                     <span className="text-sm text-gray-700 dark:text-gray-300">
-                        <span className="font-medium">Hold alle transaksjoner utenfor fordeling 🚫</span>
+                        <span className="font-medium">Holdes utenfor oppgjør 🚫</span>
                         <span className="block text-xs text-gray-500 dark:text-gray-400">
-                            Samme som «Hold kostnad utenfor fordeling» ved avstemming, men for hele prosjektet: kjøpene telles i prosjektregnskapet og mot budsjettpostene, men holdes utenfor oppgjøret mellom dere. Gjelder også transaksjoner som allerede er logget på prosjektet.
+                            Samme som «Holdes utenfor oppgjør» ved avstemming, men for hele prosjektet: kjøpene telles i prosjektregnskapet og mot budsjettpostene, men holdes utenfor oppgjøret mellom dere. Gjelder også transaksjoner som allerede er logget på prosjektet.
                         </span>
                     </span>
                 </label>
                 {form.excludeFromSharedCalc && (
                     <div className="ml-6 mt-2">
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Skal transaksjonene dekkes fra en annen konto?</label>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Betales fra en annen konto?</label>
                         <select
                             value={form.coveredByAccountId || ''}
                             onChange={e => setForm(f => ({ ...f, coveredByAccountId: e.target.value }))}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
                         >
-                            <option value="">Nei / ikke spesifisert</option>
+                            <option value="">Ingen annen konto</option>
                             {(accounts || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                         </select>
                         <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                            Vises under «Dekkes fra andre kontoer» på Oppgjør. En transaksjon kan fortsatt overstyre kontoen selv.
+                            Vises under «Betales fra andre kontoer» på Oppgjør. En transaksjon kan fortsatt overstyre kontoen selv.
                         </p>
                     </div>
                 )}

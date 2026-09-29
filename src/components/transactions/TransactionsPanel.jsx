@@ -8,11 +8,12 @@ import {
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
-import { exclusionReason } from '../../utils/settlement';
+import { exclusionReason, EXCLUSION_LABEL } from '../../utils/settlement';
 import MergeTransactionsModal from './MergeTransactionsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
 import { coverGroups, COVER_STATUS_LABEL } from '../../utils/coverage';
+import { isMoneyMovement } from '../../utils/kinds';
 
 /**
  * Reusable transaction engine: month navigation, summary, account filter,
@@ -38,9 +39,10 @@ export default function TransactionsPanel({
     const [sortBy, setSortBy] = useState('date-desc');
     const [activeFilters, setActiveFilters] = useState([]);
 
-    // Reconciliation
+    // Reconciliation: 'queue' walks the unreconciled rows, 'edit' opens one
     const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
     const [transactionsToReconcile, setTransactionsToReconcile] = useState([]);
+    const [reconcileMode, setReconcileMode] = useState('queue');
 
     // Manual duplicate merge
     const [mergeTarget, setMergeTarget] = useState(null);
@@ -73,24 +75,31 @@ export default function TransactionsPanel({
         for (const t of [...g.expenses, ...g.incomes]) coverGroupById.set(t.id, g);
     }
 
-    // Extra filters (AND-combined chips). "Manuell/CSV" = no source field:
-    // the companion app stamps source:'companion_app', the SB1 import
-    // stamps source:'sb1' and the credit-card invoice import
+    // Extra filters (AND-combined chips), in three groups. "Manuell/CSV" = no
+    // source field: the companion app stamps source:'companion_app', the SB1
+    // import stamps source:'sb1' and the credit-card invoice import
     // source:'trumf-invoice'; everything else was entered by hand or CSV.
-    const extraFilters = [
-        { key: 'comment', label: 'Kommentar', Icon: MessageSquare, test: (t) => !!t.comment },
-        { key: 'companion', label: 'Companion-app', Icon: Smartphone, test: (t) => t.source === 'companion_app' },
-        { key: 'sb1', label: 'Bank (SB1)', Icon: Landmark, test: (t) => t.source === 'sb1' },
-        { key: 'invoice', label: 'Kortfaktura', Icon: FileText, test: (t) => t.source === 'trumf-invoice' },
-        { key: 'manual', label: 'Manuell/CSV', Icon: Upload, test: (t) => !t.source, hint: 'Lagt inn for hånd eller via CSV-fil — ikke fra bank, companion-app eller kortfaktura' },
-        { key: 'creditcard', label: 'Kredittkort', Icon: CreditCard, test: (t) => creditCardIds.has(t.accountId) },
-        { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t), hint: 'Ikke knyttet til en budsjettpost ennå — teller ikke i forbruket' },
-        { key: 'booked', label: 'Venter avstemming', Icon: null, test: (t) => reconcileState(t) === 'booked', hint: 'Registrert i companion-appen og kategorisert, men bankens kopi har ikke kommet inn ennå' },
-        { key: 'awaitingRefund', label: 'Venter refusjon', Icon: null, test: (t) => !!t.awaitingRefund, hint: 'Kjøp noen skal betale tilbake, der innbetalingen ikke er koblet ennå' },
-        { key: 'cover', label: 'Dekning', Icon: ArrowLeftRight, test: (t) => coverGroupById.has(t.id), hint: 'Penger på gjennomreise: utbetalinger som dekkes av en innbetaling, og innbetalingene som dekker dem' },
-        { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy, hint: 'Felles utgifter betalt fra egen konto — trekkes fra det du skal overføre' },
-        { key: 'receipt', label: 'Kvittering', Icon: ReceiptText, test: (t) => !!t.receiptId || receipts.some(r => r.transactionId === t.id) },
+    const filterGroups = [
+        { label: 'Kilde', filters: [
+            { key: 'sb1', label: 'Bank (SB1)', Icon: Landmark, test: (t) => t.source === 'sb1' },
+            { key: 'companion', label: 'Companion-app', Icon: Smartphone, test: (t) => t.source === 'companion_app' },
+            { key: 'invoice', label: 'Kortfaktura', Icon: FileText, test: (t) => t.source === 'trumf-invoice' },
+            { key: 'manual', label: 'Manuell/CSV', Icon: Upload, test: (t) => !t.source, hint: 'Lagt inn for hånd eller via CSV-fil — ikke fra bank, companion-app eller kortfaktura' },
+            { key: 'creditcard', label: 'Kredittkort', Icon: CreditCard, test: (t) => creditCardIds.has(t.accountId) },
+        ] },
+        { label: 'Status', filters: [
+            { key: 'unreconciled', label: 'Uavstemt', Icon: null, test: (t) => !isHandled(t), hint: 'Ikke knyttet til en budsjettpost ennå — teller ikke i forbruket' },
+            { key: 'booked', label: 'Bokført', Icon: null, test: (t) => reconcileState(t) === 'booked', hint: 'Registrert i companion-appen og kategorisert, men bankens kopi har ikke kommet inn ennå' },
+            { key: 'awaitingRefund', label: 'Venter refusjon', Icon: Undo2, test: (t) => !!t.awaitingRefund, hint: 'Kjøp noen skal betale tilbake, der innbetalingen ikke er koblet ennå' },
+        ] },
+        { label: 'Spesielt', filters: [
+            { key: 'cover', label: 'Gjennomreise', Icon: ArrowLeftRight, test: (t) => coverGroupById.has(t.id), hint: 'Penger på gjennomreise: overføringer som dekkes av en innbetaling, og innbetalingene som dekker dem' },
+            { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy, hint: 'Felles utgifter betalt fra egen konto — trekkes fra det du skal overføre' },
+            { key: 'comment', label: 'Kommentar', Icon: MessageSquare, test: (t) => !!t.comment },
+            { key: 'receipt', label: 'Kvittering', Icon: ReceiptText, test: (t) => !!t.receiptId || receipts.some(r => r.transactionId === t.id) },
+        ] },
     ];
+    const extraFilters = filterGroups.flatMap(g => g.filters);
     const toggleFilter = (key) => setActiveFilters(prev =>
         prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     );
@@ -126,12 +135,10 @@ export default function TransactionsPanel({
         if (t.refundSplit) return true;
         // Pass-through money is neither income nor spending
         if (coverGroupById.has(t.id)) return true;
-        const normalize = (str) => (str ? str.trim().toLowerCase() : '');
-        const category = normalize(t.category);
-        if (['kredittkortregning', 'sparing', 'overføring', 'intern overføring'].includes(category)) return true;
+        if (isMoneyMovement(t)) return true;
         if (t.budgetItemId) {
             const linkedExpense = expenses.find(e => e.id === t.budgetItemId);
-            if (linkedExpense && normalize(linkedExpense.category) === 'sparing') return true;
+            if (linkedExpense && (linkedExpense.category || '').trim().toLowerCase() === 'sparing') return true;
         }
         return false;
     };
@@ -195,6 +202,7 @@ export default function TransactionsPanel({
         const unreconciled = displayedTransactions.filter(t => !isHandled(t));
         if (unreconciled.length > 0) {
             setTransactionsToReconcile(unreconciled);
+            setReconcileMode('queue');
             setIsReconcileModalOpen(true);
         } else {
             alert('Ingen uavstemte transaksjoner funnet.');
@@ -212,13 +220,14 @@ export default function TransactionsPanel({
     useEffect(() => {
         if (!focusNonce) return;
         const rows = (focusIds || []).map(id => transactions.find(t => t.id === id)).filter(Boolean);
-        if (rows.length > 0) { setTransactionsToReconcile(rows); setIsReconcileModalOpen(true); }
+        if (rows.length > 0) { setTransactionsToReconcile(rows); setReconcileMode(rows.length === 1 ? 'edit' : 'queue'); setIsReconcileModalOpen(true); }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [focusNonce]);
 
     const handleEditTransaction = (e, transaction) => {
         e.stopPropagation();
         setTransactionsToReconcile([transaction]);
+        setReconcileMode('edit');
         setIsReconcileModalOpen(true);
     };
 
@@ -300,24 +309,28 @@ export default function TransactionsPanel({
             </div>
 
             {/* Sort + extra filters */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold mr-1">Filter</span>
-                    {extraFilters.map(f => (
-                        <button
-                            key={f.key}
-                            onClick={() => toggleFilter(f.key)}
-                            title={f.hint}
-                            className={clsx(
-                                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
-                                activeFilters.includes(f.key)
-                                    ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300'
-                                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
-                            )}
-                        >
-                            {f.Icon && <f.Icon className="w-3.5 h-3.5" />}
-                            {f.label}
-                        </button>
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    {filterGroups.map(g => (
+                        <div key={g.label} className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">{g.label}</span>
+                            {g.filters.map(f => (
+                                <button
+                                    key={f.key}
+                                    onClick={() => toggleFilter(f.key)}
+                                    title={f.hint}
+                                    className={clsx(
+                                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+                                        activeFilters.includes(f.key)
+                                            ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300'
+                                            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                                    )}
+                                >
+                                    {f.Icon && <f.Icon className="w-3.5 h-3.5" />}
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
                     ))}
                     {activeFilters.length > 0 && (
                         <button
@@ -374,7 +387,7 @@ export default function TransactionsPanel({
                                         <div>
                                             <div className="font-medium text-gray-900 dark:text-gray-100">
                                                 {trans.name}
-                                                {exclusionReason(trans, accounts, allProjects) && <span className="ml-1 text-orange-500" title={{ account: 'Holdt utenfor fordeling av kontoflagg', project: 'Holdt utenfor fordeling av prosjektet', transaction: 'Holdt utenfor fordeling' }[exclusionReason(trans, accounts, allProjects)]}>*</span>}
+                                                {exclusionReason(trans, accounts, allProjects) && <span className="ml-1 text-orange-500" title={EXCLUSION_LABEL[exclusionReason(trans, accounts, allProjects)]}>*</span>}
                                             </div>
                                             <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
                                                 <span>{trans.date} • {linkedExpense ? linkedExpense.category : (trans.category || 'Ukategorisert')}</span>
@@ -405,8 +418,8 @@ export default function TransactionsPanel({
                                                     </span>
                                                 )}
                                                 {trans.isRefund && !trans.refundSplit && (
-                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Retur av ${refundOriginal.name} (${refundOriginal.date})${trans.refundParentId ? ' — del av en fordelt innbetaling' : ''}` : 'Retur / kreditnota'}>
-                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Retur{refundOriginal ? ` av ${refundOriginal.name}` : ''}{trans.refundParentId ? ' (del)' : ''}
+                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Refusjon av ${refundOriginal.name} (${refundOriginal.date})${trans.refundParentId ? ' — del av en fordelt innbetaling' : ''}` : 'Refusjon uten kobling til et kjøp'}>
+                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Refusjon{refundOriginal ? ` av ${refundOriginal.name}` : ''}{trans.refundParentId ? ' (del)' : ''}
                                                     </span>
                                                 )}
                                                 {trans.awaitingRefund && (
@@ -419,15 +432,15 @@ export default function TransactionsPanel({
                                                     const ok = g.status === 'ok';
                                                     const sums = `Inn ${g.in.toLocaleString('no-NO')} kr, ut ${g.out.toLocaleString('no-NO')} kr.`;
                                                     const title = g.status === 'missing'
-                                                        ? 'Merket «dekkes av innbetaling», men ingen innbetaling er koblet. Åpne raden og koble innbetalingen — eller fjern merkingen.'
+                                                        ? 'Merket som gjennomreise, men ingen innbetaling er koblet. Åpne raden og koble innbetalingen — eller fjern merkingen.'
                                                         : g.status === 'mismatch'
-                                                            ? `Innbetalingen(e) og utbetalingen(e) stemmer ikke overens. ${sums}`
+                                                            ? `Gjennomreise: innbetalingen(e) og overføringen(e) stemmer ikke overens. ${sums}`
                                                             : `Penger på gjennomreise — holdes utenfor oppgjør og overføringsberegninger. ${sums}`;
                                                     return (
                                                         <span className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider',
                                                             ok ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300')} title={title}>
                                                             {ok ? <ArrowLeftRight className="w-3 h-3 flex-shrink-0" /> : <AlertTriangle className="w-3 h-3 flex-shrink-0" />}
-                                                            {ok && trans.type === 'income' ? 'Dekker utbetaling' : COVER_STATUS_LABEL[g.status]}
+                                                            {COVER_STATUS_LABEL[g.status]}
                                                         </span>
                                                     );
                                                 })()}
@@ -485,6 +498,7 @@ export default function TransactionsPanel({
                 isOpen={isReconcileModalOpen}
                 onClose={() => setIsReconcileModalOpen(false)}
                 transactions={transactionsToReconcile}
+                mode={reconcileMode}
                 onComplete={() => { setIsReconcileModalOpen(false); setTransactionsToReconcile([]); }}
             />
             <MergeTransactionsModal

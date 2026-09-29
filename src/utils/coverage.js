@@ -86,10 +86,11 @@ export function coverGroupOf(t, all) {
     return coverGroups(all).find(g => g.expenses.some(e => e.id === t.id) || g.incomes.some(i => i.id === t.id)) || null;
 }
 
+// «Gjennomreise» is the one word for this concept everywhere in the UI.
 export const COVER_STATUS_LABEL = {
-    ok: 'Dekket av innbetaling',
-    missing: 'Dekning mangler',
-    mismatch: 'Dekning stemmer ikke',
+    ok: 'Gjennomreise',
+    missing: 'Gjennomreise · innbetaling mangler',
+    mismatch: 'Gjennomreise · summene stemmer ikke',
 };
 
 /**

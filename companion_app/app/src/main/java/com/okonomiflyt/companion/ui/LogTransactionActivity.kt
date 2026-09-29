@@ -605,7 +605,7 @@ fun StepDetails(
         ToggleRow(
             checked = awaitingRefund,
             onCheckedChange = onAwaitingRefundChange,
-            label = "Refunderes helt eller delvis"
+            label = "Venter refusjon (noen betaler tilbake)"
         )
         if (awaitingRefund) {
             Column(modifier = Modifier.padding(horizontal = 12.dp)) {
@@ -629,12 +629,12 @@ fun StepDetails(
         ToggleRow(
             checked = excludeFromSharedCalc,
             onCheckedChange = onExcludeChange,
-            label = "Ekskluder fra fellesregnskap"
+            label = "Holdes utenfor oppgjør"
         )
 
         if (excludeFromSharedCalc) {
             var coveredExpanded by remember { mutableStateOf(false) }
-            val selectedAccName = accounts.find { it.id == coveredByAccountId }?.name ?: "Nei / ikke spesifisert"
+            val selectedAccName = accounts.find { it.id == coveredByAccountId }?.name ?: "Ingen annen konto"
             ExposedDropdownMenuBox(
                 expanded = coveredExpanded,
                 onExpandedChange = { coveredExpanded = it }
@@ -643,7 +643,7 @@ fun StepDetails(
                     value = selectedAccName,
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("Dekkes fra konto?") },
+                    label = { Text("Betales fra konto?") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = coveredExpanded) },
                     modifier = Modifier
                         .fillMaxWidth()

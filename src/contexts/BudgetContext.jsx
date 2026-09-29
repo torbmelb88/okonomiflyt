@@ -622,6 +622,56 @@ export function BudgetProvider({ children }) {
         await applyPatches(patches);
     };
 
+    // Sets the whole cover state of one expense in a single write: the flag
+    // and the exact set of covering incomes. The reconcile dialog stages its
+    // changes and saves them together, and doing it as one batch means no
+    // step reads state a previous step has just changed.
+    const setExpenseCover = async (expenseId, flag, incomeIds) => {
+        const expense = transactions.find(t => t.id === expenseId);
+        if (!expense) throw new Error('Fant ikke transaksjonen');
+        const before = coverLinkIds(expense);
+        const after = flag ? [...new Set(incomeIds)] : [];
+        const patches = { [expenseId]: { coveredByIncoming: !!flag, coveredByTransactionIds: after } };
+        const expensesAfter = transactions.map(t => t.id === expenseId ? { ...t, ...patches[expenseId] } : t);
+        for (const id of after.filter(id => !before.includes(id))) {
+            const income = transactions.find(t => t.id === id);
+            if (income?.type !== 'income') throw new Error('Gjennomreise går fra en innbetaling til en utbetaling');
+            if (!income.reconciled && reconcilesOnLink(income)) patches[id] = { reconciled: true, reconciledByCover: true };
+        }
+        for (const id of before.filter(id => !after.includes(id))) {
+            const release = releaseIncomePatch(transactions.find(t => t.id === id), expensesAfter);
+            if (release) patches[id] = release;
+        }
+        await applyPatches(patches);
+    };
+
+    // The income side of the same thing: which expenses this payment covers,
+    // added and removed together.
+    const setIncomeCover = async (incomeId, { add = [], remove = [] }) => {
+        const income = transactions.find(t => t.id === incomeId);
+        if (!income || income.type !== 'income') throw new Error('Fant ikke innbetalingen');
+        const patches = {};
+        for (const expenseId of add) {
+            const expense = transactions.find(t => t.id === expenseId);
+            if (!expense || expense.type === 'income') throw new Error('Gjennomreise går fra en innbetaling til en utbetaling');
+            const ids = coverLinkIds(expense);
+            patches[expenseId] = { coveredByIncoming: true, coveredByTransactionIds: ids.includes(incomeId) ? ids : [...ids, incomeId] };
+        }
+        for (const expenseId of remove) {
+            const expense = transactions.find(t => t.id === expenseId);
+            if (!expense) continue;
+            patches[expenseId] = { coveredByTransactionIds: coverLinkIds(expense).filter(id => id !== incomeId) };
+        }
+        const expensesAfter = transactions.map(t => patches[t.id] ? { ...t, ...patches[t.id] } : t);
+        const stillCovering = expensesAfter.some(e => isCoveredExpense(e) && coverLinkIds(e).includes(incomeId));
+        if (stillCovering) {
+            if (!income.reconciled && reconcilesOnLink(income)) patches[incomeId] = { reconciled: true, reconciledByCover: true };
+        } else if (income.reconciledByCover) {
+            patches[incomeId] = { reconciled: false, reconciledByCover: null };
+        }
+        await applyPatches(patches);
+    };
+
     // --- Receipts (grocery line items from the companion app) ---
 
     // Load receipts on login (cheap collection — one doc per receipt)
@@ -1142,6 +1192,8 @@ export function BudgetProvider({ children }) {
         setCoveredByIncoming,
         linkCover,
         unlinkCover,
+        setExpenseCover,
+        setIncomeCover,
         reloadTransactions,
         bankBalances,
         linkTransactionToBudgetItem,

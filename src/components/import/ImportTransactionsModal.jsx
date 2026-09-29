@@ -43,7 +43,7 @@ const firstOfThisMonth = () => {
  * account's default budget, and dedups against existing transactions (incl. the
  * companion app's). A "from date" limits how far back to pull. Preview, confirm.
  */
-export default function ImportTransactionsModal({ isOpen, onClose }) {
+export default function ImportTransactionsModal({ isOpen, onClose, onImported }) {
     const { reloadTransactions } = useBudget();
     const [raw, setRaw] = useState(null); // { staged, accByKey, existing }
     const [fromDate, setFromDate] = useState(firstOfThisMonth);
@@ -257,14 +257,18 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
 
     const apply = async () => {
         setRunning(true); setError('');
+        // Ids of the rows that land as «uavstemt», so the caller can open the
+        // reconcile flow on them right away (like the CSV/invoice imports do).
+        const createdIds = [];
         try {
             for (const c of plan.toCreate) {
-                await api.addDocument('transactions', {
+                const ref = await api.addDocument('transactions', {
                     budgetId: c.budgetId, accountId: c.accountId, date: c.date, month: c.month,
                     name: c.name, amount: c.amount, type: c.type,
                     reconciled: false, source: 'sb1', externalId: c.externalId,
                     createdAt: new Date().toISOString(),
                 });
+                if (ref?.id) createdIds.push(ref.id);
             }
             for (const m of plan.toMerge) {
                 await api.updateDocument('transactions', m.existingId, { externalId: m.externalId, source: 'sb1', reconciled: m.reconciled, origin: m.origin });
@@ -279,10 +283,11 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
             let fxLinked = 0, fxCreated = 0;
             for (const f of plan.toFx) {
                 if (fxOff.has(f.key)) {
-                    await api.addDocument('transactions', {
+                    const ref = await api.addDocument('transactions', {
                         ...f.create, reconciled: false, source: 'sb1',
                         createdAt: new Date().toISOString(),
                     });
+                    if (ref?.id) createdIds.push(ref.id);
                     fxCreated++;
                 } else {
                     await api.updateDocument('transactions', f.existing.id, f.patch);
@@ -290,7 +295,7 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                 }
             }
             await reloadTransactions();
-            setDone({ created: plan.toCreate.length + fxCreated, merged: plan.toMerge.length, updated: plan.toUpdate.length + plan.toRebook.length, fxLinked });
+            setDone({ created: plan.toCreate.length + fxCreated, merged: plan.toMerge.length, updated: plan.toUpdate.length + plan.toRebook.length, fxLinked, createdIds });
         } catch (e) {
             setError('Import feilet: ' + e.message);
         } finally {
@@ -324,6 +329,11 @@ export default function ImportTransactionsModal({ isOpen, onClose }) {
                             <p className="text-sm text-gray-500 dark:text-gray-400">
                                 Hentet inn {done.created} nye transaksjoner{done.merged > 0 ? `, slo sammen ${done.merged} med eksisterende` : ''}{done.fxLinked > 0 ? `, koblet ${done.fxLinked} valutakjøp til bankbeløpet` : ''}{done.updated > 0 ? `, og oppdaterte navn på ${done.updated}` : ''}. De nye ligger som uavstemt.
                             </p>
+                            {done.createdIds.length > 0 && onImported && (
+                                <button onClick={() => { onClose(); onImported(done.createdIds); }} className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg">
+                                    <CheckCircle2 className="w-4 h-4" />Avstem de {done.createdIds.length} nye nå
+                                </button>
+                            )}
                         </div>
                     ) : (
                         <div className="space-y-4">

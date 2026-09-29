@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Download, Upload, CreditCard, Landmark, Calendar, FileText } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import ImportTransactionsModal from './ImportTransactionsModal';
+import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
 import CsvImportFlow from './CsvImportFlow';
 import TrumfInvoiceImportFlow from './TrumfInvoiceImportFlow';
 
@@ -13,9 +14,12 @@ import TrumfInvoiceImportFlow from './TrumfInvoiceImportFlow';
  * lives on Transaksjoner; spending statistics on Forbruk.
  */
 export default function ImportPage() {
-    const { activeBudget, accounts, loading } = useBudget();
+    const { activeBudget, accounts, transactions, loading } = useBudget();
 
     const [isBankImportOpen, setIsBankImportOpen] = useState(false);
+    // Fresh bank rows to walk through right after the import — the same tail
+    // the CSV and invoice imports have.
+    const [bankRowsToReconcile, setBankRowsToReconcile] = useState([]);
     const [isCsvOpen, setIsCsvOpen] = useState(false);
     const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
     const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -115,7 +119,20 @@ export default function ImportPage() {
                 </div>
             </div>
 
-            <ImportTransactionsModal isOpen={isBankImportOpen} onClose={() => setIsBankImportOpen(false)} />
+            <ImportTransactionsModal
+                isOpen={isBankImportOpen}
+                onClose={() => setIsBankImportOpen(false)}
+                onImported={(ids) => {
+                    const rows = ids.map(id => transactions.find(t => t.id === id)).filter(Boolean);
+                    if (rows.length > 0) setBankRowsToReconcile(rows);
+                }}
+            />
+            <ReconcileTransactionsModal
+                isOpen={bankRowsToReconcile.length > 0}
+                onClose={() => setBankRowsToReconcile([])}
+                transactions={bankRowsToReconcile}
+                onComplete={() => setBankRowsToReconcile([])}
+            />
             <CsvImportFlow
                 isOpen={isCsvOpen}
                 onClose={() => setIsCsvOpen(false)}
