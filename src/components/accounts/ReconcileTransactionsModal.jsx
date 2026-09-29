@@ -46,7 +46,7 @@ const listCls = "max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-g
 export default function ReconcileTransactionsModal({ isOpen, onClose, transactions, onComplete, mode = 'queue' }) {
     const { notify, confirm } = useDialog();
     const {
-        expenses, budgetItemDefs, categories, ensureInstanceForDef,
+        allExpenses: expenses, budgetItemDefs, categories, ensureInstanceForDef,
         addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, transactions: allTransactions,
         linkRefund, linkRefundSplit, unlinkRefund,
         setExpenseCover, setIncomeCover,
