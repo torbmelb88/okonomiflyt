@@ -5,12 +5,12 @@ import ConfirmationModal from '../common/ConfirmationModal';
 import InfoTip from '../common/InfoTip';
 import { SCOPE_LABEL } from '../../utils/categoryMigration';
 
-// «Utenfor statistikk» only touches the Forbruk page (utils: Forbruk.jsx
+// «Utenfor statistikk» only touches the Budsjett page totals (Budget.jsx
 // isItemExcludedFromStats) — the budget, the settlement and Min Oversikt
 // still count the post. Typical use: the top-up transfer to Felleskonto,
 // whose purchases already count on their own posts.
-const STATS_TIP = 'Holdes bare utenfor Forbruk-siden (listen, totalene og kakediagrammet), fordi pengene telles der via andre poster — typisk overføringen til Felleskonto, der kjøpene fra kontoen allerede teller. Posten teller fortsatt i budsjettet, i oppgjøret og på Min Oversikt.';
-const STATS_TITLE = (on) => on ? 'Telles ikke på Forbruk-siden — klikk for å inkludere' : 'Hold utenfor statistikk på Forbruk-siden';
+const STATS_TIP = 'Holdes bare utenfor summene og kakediagrammet på Budsjett-siden (raden står igjen, nedtonet), fordi pengene telles der via andre poster — typisk overføringen til Felleskonto, der kjøpene fra kontoen allerede teller. Posten teller fortsatt i budsjettet, i oppgjøret og på Min Oversikt.';
+const STATS_TITLE = (on) => on ? 'Telles ikke i summene på Budsjett-siden — klikk for å inkludere' : 'Hold utenfor statistikken på Budsjett-siden';
 const SCOPE_TIP = 'Hvilke budsjett posten dukker opp i: Felles bare i fellesbudsjettet, Privat bare i private budsjett, Begge i alle. Beløpet settes uansett for hvert budsjett for seg.';
 
 const SCOPES = ['both', 'shared', 'private'];
@@ -104,10 +104,12 @@ export default function CategoryBudgetManager() {
                         {/* Category header */}
                         <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-700/40">
                             {editingCatId === cat.id ? (
-                                <div className="flex items-center gap-2 flex-1">
-                                    <input value={editCatName} onChange={(e) => setEditCatName(e.target.value)} autoFocus className="flex-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-600 dark:text-white" />
-                                    <button onClick={async () => { if (editCatName.trim()) { await updateCategory(cat.id, editCatName.trim()); } setEditingCatId(null); }} className="p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30 rounded"><Check className="w-4 h-4" /></button>
-                                    <button onClick={() => setEditingCatId(null)} className="p-1 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"><X className="w-4 h-4" /></button>
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <input value={editCatName} onChange={(e) => setEditCatName(e.target.value)} autoFocus
+                                        onKeyDown={async (e) => { if (e.key === 'Enter') { if (editCatName.trim()) await updateCategory(cat.id, editCatName.trim()); setEditingCatId(null); } if (e.key === 'Escape') setEditingCatId(null); }}
+                                        className="flex-1 min-w-0 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-600 dark:text-white" />
+                                    <button onClick={async () => { if (editCatName.trim()) { await updateCategory(cat.id, editCatName.trim()); } setEditingCatId(null); }} title="Lagre" className="p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30 rounded flex-shrink-0"><Check className="w-4 h-4" /></button>
+                                    <button onClick={() => setEditingCatId(null)} title="Avbryt" className="p-1 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex-shrink-0"><X className="w-4 h-4" /></button>
                                 </div>
                             ) : (
                                 <>
@@ -129,13 +131,17 @@ export default function CategoryBudgetManager() {
                             {defsFor(cat.id).map(def => (
                                 <div key={def.id} className="flex items-center justify-between px-4 py-2">
                                     {editingDef?.id === def.id ? (
-                                        <div className="flex items-center gap-2 flex-1">
-                                            <input value={editingDef.name} onChange={(e) => setEditingDef({ ...editingDef, name: e.target.value })} className="flex-1 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white" />
-                                            <select value={editingDef.scope} onChange={(e) => setEditingDef({ ...editingDef, scope: e.target.value })} className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm">
-                                                {SCOPES.map(s => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
-                                            </select>
-                                            <button onClick={async () => { if (editingDef.name.trim()) await updateBudgetItemDef(def.id, { name: editingDef.name.trim(), scope: editingDef.scope }); setEditingDef(null); }} className="p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30 rounded"><Check className="w-4 h-4" /></button>
-                                            <button onClick={() => setEditingDef(null)} className="p-1 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"><X className="w-4 h-4" /></button>
+                                        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+                                            <input value={editingDef.name} onChange={(e) => setEditingDef({ ...editingDef, name: e.target.value })} autoFocus
+                                                onKeyDown={async (e) => { if (e.key === 'Enter') { if (editingDef.name.trim()) await updateBudgetItemDef(def.id, { name: editingDef.name.trim(), scope: editingDef.scope }); setEditingDef(null); } if (e.key === 'Escape') setEditingDef(null); }}
+                                                className="flex-1 min-w-[8rem] px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white" />
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                <select value={editingDef.scope} onChange={(e) => setEditingDef({ ...editingDef, scope: e.target.value })} className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm">
+                                                    {SCOPES.map(s => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
+                                                </select>
+                                                <button onClick={async () => { if (editingDef.name.trim()) await updateBudgetItemDef(def.id, { name: editingDef.name.trim(), scope: editingDef.scope }); setEditingDef(null); }} title="Lagre" className="p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30 rounded"><Check className="w-4 h-4" /></button>
+                                                <button onClick={() => setEditingDef(null)} title="Avbryt" className="p-1 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"><X className="w-4 h-4" /></button>
+                                            </div>
                                         </div>
                                     ) : (
                                         <>
@@ -155,13 +161,13 @@ export default function CategoryBudgetManager() {
                             ))}
 
                             {/* Add def row */}
-                            <div className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800">
+                            <div className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 min-w-0">
                                 <input
                                     value={defDrafts[cat.id]?.name || ''}
                                     onChange={(e) => setDefDrafts(prev => ({ ...prev, [cat.id]: { ...(prev[cat.id] || { scope: 'both' }), name: e.target.value } }))}
                                     onKeyDown={(e) => { if (e.key === 'Enter') handleAddDef(cat.id); }}
                                     placeholder="Ny budsjettpost (f.eks. Boliglån)…"
-                                    className="flex-1 px-2 py-1 text-sm border border-gray-200 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"
+                                    className="flex-1 min-w-0 px-2 py-1 text-sm border border-gray-200 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"
                                 />
                                 <select
                                     value={defDrafts[cat.id]?.scope || 'both'}
