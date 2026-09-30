@@ -25,7 +25,7 @@ export function useImportReview() {
     const [isDuplicateReviewOpen, setIsDuplicateReviewOpen] = useState(false);
     const [potentialDuplicates, setPotentialDuplicates] = useState([]);
     const [pendingImportTransactions, setPendingImportTransactions] = useState([]);
-    const [importStats, setImportStats] = useState({ merged: 0, skipped: 0, skippedReport: [] });
+    const [importStats, setImportStats] = useState({ merged: 0, alreadyImported: 0, skipped: 0, skippedReport: [] });
 
     const finalizeImport = async (transactionsToSave, stats) => {
         let successCount = 0;
@@ -46,6 +46,9 @@ export function useImportReview() {
         let msg = '';
         if (successCount > 0) msg += `Importerte ${successCount} nye transaksjoner. `;
         if (stats.merged > 0) msg += `Oppdaterte ${stats.merged} eksisterende med kommentarer. `;
+        if (stats.linked > 0) msg += `Knyttet ${stats.linked} til rader som ventet på bankens kopi. `;
+        const knownMsg = stats.alreadyImported > 0 ? `${stats.alreadyImported} ${stats.alreadyImported === 1 ? 'rad fantes' : 'rader fantes'} fra før og ble hoppet over. ` : '';
+        if (msg) msg += knownMsg;
 
         let skippedMsg = '';
         if (stats.skippedReport && stats.skippedReport.length > 0) {
@@ -59,7 +62,7 @@ export function useImportReview() {
         } else if (failureReasons.length > 0) {
             notify({ message: 'Noe gikk galt:\n' + failureReasons.join('\n'), variant: 'error' });
         } else {
-            await notify({ title: 'Ingen nye transaksjoner', message: `Ingen nye transaksjoner importert.${skippedMsg}` });
+            await notify({ title: 'Ingen nye transaksjoner', message: `Ingen nye transaksjoner importert. ${knownMsg}${skippedMsg}` });
         }
 
         if (finalNewTransactions.length > 0) {
@@ -106,7 +109,7 @@ export function useImportReview() {
 
         await finalizeImport([...pendingImportTransactions, ...imports], {
             ...importStats,
-            merged: importStats.merged + mergedCount,
+            linked: mergedCount,
         });
         setPendingImportTransactions([]);
     };
@@ -119,6 +122,7 @@ export function useImportReview() {
     const review = async (matchResult, stats = {}) => {
         const baseStats = {
             merged: matchResult.mergedCount || 0,
+            alreadyImported: matchResult.alreadyImportedCount || 0,
             skipped: stats.skipped || 0,
             skippedReport: stats.skippedReport || [],
         };
