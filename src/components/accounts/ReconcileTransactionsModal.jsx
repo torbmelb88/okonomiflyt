@@ -10,7 +10,7 @@ import { reconcilesOnLink, isHandled } from '../../utils/reconciliation';
 import { refundStatus, refundsOf, allocationsValid, allocationComplete, parseAmount } from '../../utils/refunds';
 import RefundAllocationEditor from './RefundAllocationEditor';
 import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
-import { KIND, KIND_CATEGORY, KIND_EMOJI, KIND_HELP, kindsForType, kindLabelFor, transactionKind, isKindCategory, isSalary } from '../../utils/kinds';
+import { KIND, KIND_CATEGORY, KIND_EMOJI, KIND_HELP, kindsForType, kindLabelFor, kindHelpFor, transactionKind, isKindCategory, isSalary } from '../../utils/kinds';
 import clsx from 'clsx';
 import { useDialog } from '../../contexts/DialogContext';
 
@@ -590,7 +590,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                         </div>
                         {showGuide && (
                             <ul className="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/40 rounded-lg p-3 space-y-1">
-                                {kinds.map(k => <li key={k}><span className="font-medium text-gray-800 dark:text-gray-200">{KIND_EMOJI[k]} {kindLabelFor(k, currentTransaction.type)}:</span> {KIND_HELP[k]}</li>)}
+                                {kinds.map(k => <li key={k}><span className="font-medium text-gray-800 dark:text-gray-200">{KIND_EMOJI[k]} {kindLabelFor(k, currentTransaction.type)}:</span> {kindHelpFor(k, currentTransaction.type)}</li>)}
                                 {isExpense && <li><span className="font-medium text-gray-800 dark:text-gray-200">🔃 Gjennomreise (under Flere valg):</span> {KIND_HELP.passthrough}</li>}
                             </ul>
                         )}

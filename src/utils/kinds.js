@@ -109,15 +109,21 @@ export const KIND_HELP = {
     salary: 'Lønn inn på konto. Utgangspunktet for «Til forbruk» på Min Oversikt.',
     savings: 'Overføring til sparekonto (den utgående raden). Trekkes fra i «Disponibelt».',
     transfer: 'Penger mellom egne kontoer. Holdes helt utenfor forbruk og oppgjør.',
-    creditCardBill: 'Betaling av kortregningen. Kjøpene telles fra kortet, ikke fra denne.',
+    creditCardBill: 'Betaling av kortregningen: uttaket fra bankkontoen, og innbetalingen som lander på kortet. Kjøpene telles fra kortet, ikke fra disse.',
     refund: 'Innbetaling som er tilbakebetaling av et kjøp (Vipps, retur). Nettes mot kjøpet.',
     passthrough: 'Innbetaling som går rett videre ut igjen (f.eks. barnetrygd til sparing). Begge sider holdes utenfor oppgjør.',
 };
 
 /** The kinds a row of this type can be given, in the order the dialog shows them. */
 export const kindsForType = (type) => type === 'income'
-    ? [KIND.salary, KIND.refund, KIND.passthrough, KIND.transfer, KIND.purchase]
+    ? [KIND.salary, KIND.refund, KIND.passthrough, KIND.transfer, KIND.creditCardBill, KIND.purchase]
     : [KIND.purchase, KIND.savings, KIND.transfer, KIND.creditCardBill];
+
+/** Help text for the kind as it applies to this row's type. */
+export const kindHelpFor = (kind, type) =>
+    kind === KIND.purchase && type === 'income'
+        ? 'Annen inntekt som hører til en budsjettpost, f.eks. at noen betaler deg for bensin. Trekkes fra forbruket på posten.'
+        : KIND_HELP[kind];
 
 /** Label for the kind as it applies to this row's type (income against a budget item is not a «kjøp»). */
 export const kindLabelFor = (kind, type) =>
