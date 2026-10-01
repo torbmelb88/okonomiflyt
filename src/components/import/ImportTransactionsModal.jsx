@@ -4,6 +4,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
 import { fxPlausible } from '../../utils/currency';
 import { isSelfReported } from '../../utils/reconciliation';
+import { monthAfterRedate } from '../../utils/countedMonth';
 
 const datesClose = (d1, d2, tol = 4) => {
     const diff = Math.abs(new Date(d2) - new Date(d1));
@@ -207,7 +208,7 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                     patch: {
                         name: s.name || fx.name,
                         date: s.date,
-                        month: (s.date || '').slice(0, 7),
+                        month: monthAfterRedate(fx, s.date), // a «telles i» move survives the bank's date
                         amount: s.amount,
                         externalId: s.externalId,
                         source: 'sb1',
@@ -234,7 +235,7 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                     ...(keepIdentity ? {} : {
                         name: s.name || rebook.name,
                         date: s.date,
-                        month: (s.date || '').slice(0, 7),
+                        month: monthAfterRedate(rebook, s.date), // a «telles i» move survives the bank's date
                     }),
                 });
             } else {

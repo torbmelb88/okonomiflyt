@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
 import { exclusionReason, EXCLUSION_LABEL } from '../../utils/settlement';
+import { isCountedInOtherMonth, countedInLabel, countedInTitle } from '../../utils/countedMonth';
 import MergeTransactionsModal from './MergeTransactionsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
 import { isHandled, reconcileState } from '../../utils/reconciliation';
@@ -345,6 +346,9 @@ export default function TransactionsPanel({
                                             </div>
                                             <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
                                                 <span>{trans.date} • {linkedExpense ? linkedLabel(linkedExpense).category : (trans.category || 'Ukategorisert')}</span>
+                                                {isCountedInOtherMonth(trans) && (
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider" title={countedInTitle(trans)}>{countedInLabel(trans)}</span>
+                                                )}
                                                 {linkedExpense && (
                                                     <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
                                                         <Link2 className="w-3 h-3 flex-shrink-0" />{linkedLabel(linkedExpense).name}

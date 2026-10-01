@@ -11,6 +11,7 @@ import { refundStatus, refundsOf, allocationsValid, allocationComplete, parseAmo
 import RefundAllocationEditor from './RefundAllocationEditor';
 import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
 import { KIND, KIND_CATEGORY, KIND_EMOJI, KIND_HELP, kindsForType, kindLabelFor, kindHelpFor, transactionKind, isKindCategory, isSalary } from '../../utils/kinds';
+import { isCountedInOtherMonth, dateMonth, addMonths, formatMonthLong, formatMonthShort } from '../../utils/countedMonth';
 import clsx from 'clsx';
 import { useDialog } from '../../contexts/DialogContext';
 
@@ -48,7 +49,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const {
         allExpenses: expenses, budgetItemDefs, categories, ensureInstanceForDef,
         addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, allTransactions,
-        linkRefund, linkRefundSplit, unlinkRefund,
+        linkRefund, linkRefundSplit, unlinkRefund, isMonthReconciled,
         setExpenseCover, setIncomeCover,
     } = useBudget();
 
@@ -96,6 +97,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const [comment, setComment] = useState('');
     const [isEditingDate, setIsEditingDate] = useState(false);
     const [tempDate, setTempDate] = useState('');
+    const [countedMonth, setCountedMonth] = useState(''); // '' = the date's month (utils/countedMonth.js)
     const [currency, setCurrency] = useState(''); // '' = NOK
 
     const suggestions = useMemo(() => {
@@ -159,9 +161,10 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setComment(t?.comment || '');
         setIsEditingDate(false);
         setTempDate(t?.date || '');
+        setCountedMonth(isCountedInOtherMonth(t) ? t.month : '');
         setCurrency(t?.currency && t.currency !== 'NOK' ? t.currency : '');
         // «Flere valg» opens by itself when something in it is already set
-        setShowMore(!!(t?.isUnnecessary || t?.excludeFromSharedCalc || t?.paidPrivatelyBy || t?.awaitingRefund || t?.comment || (live && isCoveredExpense(live)) || (t?.currency && t.currency !== 'NOK')));
+        setShowMore(!!(t?.isUnnecessary || t?.excludeFromSharedCalc || t?.paidPrivatelyBy || t?.awaitingRefund || t?.comment || (live && isCoveredExpense(live)) || (t?.currency && t.currency !== 'NOK') || isCountedInOtherMonth(t)));
         // Budget: the account's default, or the stored one for a reconciled row
         const txAccount = accounts.find(a => a.id === t?.accountId);
         const accountDefault = txAccount?.defaultBudgetId || txAccount?.budgetId;
@@ -197,6 +200,24 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const projectHoldsOut = !!selectedProject?.excludeFromSharedCalc;
     const projectCoverAccount = projectHoldsOut && selectedProject.coveredByAccountId
         ? accounts.find(a => a.id === selectedProject.coveredByAccountId) : null;
+
+    // --- telles i (utils/countedMonth.js) ---
+    // Only a purchase can be counted in another month; every other kind
+    // follows the date. The choice is the month before, the date's own, or
+    // the month after — plus whatever is stored, so a later date edit never
+    // silently drops it.
+    const dateMonthNow = dateMonth(tempDate);
+    const effectiveMonth = kind === KIND.purchase && countedMonth ? countedMonth : dateMonthNow;
+    const countedMonthMoved = !!dateMonthNow && effectiveMonth !== dateMonthNow;
+    const countedMonthOptions = dateMonthNow.length === 7
+        ? [...new Set([addMonths(dateMonthNow, -1), dateMonthNow, addMonths(dateMonthNow, 1), countedMonth].filter(Boolean))].sort()
+        : [];
+    // Months already marked as reconciled whose settlement this save changes
+    // (the one the row leaves and the one it enters). Warned about, not blocked.
+    const storedMonth = liveTx.month || dateMonth(liveTx.date);
+    const reconciledMonthsTouched = dateMonthNow && effectiveMonth !== storedMonth
+        ? [...new Set([storedMonth, effectiveMonth])].filter(m => m && isMonthReconciled(m))
+        : [];
     const eligibleDefs = budgetItemDefs
         .filter(d => d.scope === 'both' || d.scope === scope)
         .sort((a, b) => catName(a.categoryId).localeCompare(catName(b.categoryId), 'no-NO') || a.name.localeCompare(b.name, 'no-NO'));
@@ -330,6 +351,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             if (excludeFromSharedCalc || projectHoldsOut) parts.push(`utenfor oppgjør${(excludeFromSharedCalc ? coveredByAccountId : projectCoverAccount?.id) ? `, betales fra ${accountName(excludeFromSharedCalc ? coveredByAccountId : projectCoverAccount.id)}` : ''}`);
             if (showUtlegg && asUtlegg) parts.push(isIncome ? 'mottatt privat, legges til overføringen' : 'utlegg');
             if (isUnnecessary) parts.push('unødvendig');
+            if (countedMonthMoved) parts.push(`telles i ${formatMonthLong(effectiveMonth)}`);
             if (isExpense && awaitingRefund && !markRefundComplete) parts.push(`venter refusjon${expectedRefundAmount ? ` ${fmtKr(parseAmount(expectedRefundAmount))} kr` : ''}`);
             if (isExpense && markRefundComplete) parts.push('ferdig refundert');
             if (isExpense && selectedIncomingId && allocationsOk) parts.push(`kobler ${allocIncome.name}`);
@@ -369,7 +391,9 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             const common = {
                 budgetId: selectedBudgetId || tx.budgetId || null,
                 comment: comment,
-                date: tempDate, month: tempDate.slice(0, 7),
+                // «Telles i»: a purchase may be counted in another month than
+                // it was paid (utils/countedMonth.js); every other kind follows the date.
+                date: tempDate, month: purchase && countedMonth ? countedMonth : tempDate.slice(0, 7),
                 currency: currency || null,
                 ...(keepInherited ? {} : {
                     isUnnecessary: purchase && isUnnecessary,
@@ -519,6 +543,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         kind === KIND.purchase && (excludeFromSharedCalc || projectHoldsOut) && 'Utenfor oppgjør',
         kind === KIND.purchase && showUtlegg && asUtlegg && (isIncome ? 'Mottatt privat' : 'Utlegg'),
         kind === KIND.purchase && isUnnecessary && 'Unødvendig',
+        kind === KIND.purchase && countedMonthMoved && `Telles i ${formatMonthShort(effectiveMonth)}`,
         kind === KIND.purchase && isExpense && awaitingRefund && !markRefundComplete && 'Venter refusjon',
         kind === KIND.purchase && isExpense && (!awaitingRefund || markRefundComplete) && linkedRefunds.length > 0 && 'Refundert',
         isExpense && coveredByIncoming && 'Gjennomreise',
@@ -813,6 +838,28 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                 <input type="checkbox" checked={isUnnecessary} onChange={(e) => setIsUnnecessary(e.target.checked)} className="w-4 h-4 mt-0.5 rounded" />
                                                 <span>Unødvendig kjøp 💸 <InfoTip text="Ren merkelapp for egen bevisstgjøring. Telles helt som normalt." /></span>
                                             </label>
+                                            {countedMonthOptions.length > 0 && (
+                                                <div className="space-y-1">
+                                                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 flex-wrap">
+                                                        <span>Telles i 📅
+                                                            <InfoTip text="Regningen betales i én måned, men hører til en annen (f.eks. en barnehagefaktura med forfall som vandrer). Bankdatoen beholdes, men kostnaden telles i måneden du velger — i oppgjør, budsjett og oversikt." />
+                                                        </span>
+                                                        <select value={effectiveMonth} onChange={(e) => setCountedMonth(e.target.value === dateMonthNow ? '' : e.target.value)} className={inputCls}>
+                                                            {countedMonthOptions.map(m => (
+                                                                <option key={m} value={m}>{formatMonthLong(m)}{m === dateMonthNow ? ' (bankdato)' : ''}</option>
+                                                            ))}
+                                                        </select>
+                                                    </label>
+                                                    {reconciledMonthsTouched.length > 0 && (
+                                                        <p className="ml-6 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-1.5">
+                                                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                                                            <span>
+                                                                {reconciledMonthsTouched.map(formatMonthLong).join(' og ')} er markert som avstemt. Oppgjøret for {reconciledMonthsTouched.length > 1 ? 'begge månedene' : 'måneden'} endres med {fmtKr(currentTransaction.amount)} kr når du lagrer.
+                                                            </span>
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
                                             {isExpense && (
                                                 <div className="space-y-2">
                                                     <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
