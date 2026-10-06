@@ -3,7 +3,7 @@ import {
     Upload, ArrowDownLeft, ArrowUpRight, Edit2, Trash2, CheckCircle,
     Link2, FolderKanban, ReceiptText, ArrowRight, CreditCard,
     MessageSquare, Smartphone, Landmark, ArrowUpDown, X, Undo2, Merge, FileText,
-    ArrowLeftRight, AlertTriangle, SlidersHorizontal, ChevronDown, ChevronUp,
+    ArrowLeftRight, AlertTriangle, SlidersHorizontal, ChevronDown, ChevronUp, CornerDownRight,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
@@ -140,6 +140,14 @@ export default function TransactionsPanel({
         .filter(t => extraFilters.every(f => !activeFilters.includes(f.key) || f.test(t)))
         .sort(sortComparators[sortBy] || sortComparators['date-desc']);
 
+    // Refund-split children (utils/refunds.js) are drawn indented under their
+    // parent when both are in the list. A child whose parent is filtered out
+    // stays a row of its own, so nothing that passes the filters disappears.
+    const displayedIds = new Set(displayedTransactions.map(t => t.id));
+    const rows = displayedTransactions
+        .filter(t => !(t.refundParentId && displayedIds.has(t.refundParentId)))
+        .map(t => ({ row: t, children: t.refundSplit ? displayedTransactions.filter(c => c.refundParentId === t.id) : [] }));
+
     // Accounts are global; only offer filter buttons for accounts that actually
     // have transactions in this view (plus the currently selected one).
     const accountsWithTx = accounts.filter(a =>
@@ -208,6 +216,141 @@ export default function TransactionsPanel({
         setTransactionsToReconcile([transaction]);
         setReconcileMode('edit');
         setIsReconcileModalOpen(true);
+    };
+
+    // One list row. `nested` = a refund-split child drawn under its parent:
+    // indented, muted, and without merge/delete (the split is undone as a whole
+    // from the parent or from the reconcile dialog).
+    const renderRow = (trans, nested = false) => {
+        const linkedExpense = trans.budgetItemId ? expenses.find(e => e.id === trans.budgetItemId) : null;
+        const linkedProject = trans.projectId ? projects.find(p => p.id === trans.projectId) : null;
+        const hasReceipt = !!trans.receiptId || receipts.some(r => r.transactionId === trans.id);
+        const refundOriginal = trans.isRefund && trans.refundOfTransactionId ? transactions.find(t => t.id === trans.refundOfTransactionId) : null;
+        const refundedAmount = refundedByOriginal.get(trans.id) || 0;
+        const splitChildren = trans.refundSplit ? transactions.filter(t => t.refundParentId === trans.id).length : 0;
+        const refundExpected = trans.expectedRefundAmount > 0 ? trans.expectedRefundAmount : trans.amount;
+        return (
+            <div key={trans.id} className={clsx('flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group',
+                nested ? 'pl-6 pr-6 py-3 bg-gray-50/60 dark:bg-gray-900/30' : 'px-6 py-4')}>
+                <div className="flex items-center space-x-4">
+                    {nested ? (
+                        <div className="w-10 h-10 flex items-center justify-center text-teal-500 dark:text-teal-400" title="Del av den fordelte innbetalingen over">
+                            <CornerDownRight className="w-5 h-5" />
+                        </div>
+                    ) : (
+                        <div className={clsx('w-10 h-10 rounded-full flex items-center justify-center',
+                            trans.type === 'income' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400')}>
+                            {trans.type === 'income' ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
+                        </div>
+                    )}
+                    <div>
+                        <div className="font-medium text-gray-900 dark:text-gray-100">
+                            {trans.name}
+                            {exclusionReason(trans, accounts, allProjects) && <span className="ml-1 text-orange-500" title={EXCLUSION_LABEL[exclusionReason(trans, accounts, allProjects)]}>*</span>}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
+                            <span>{trans.date} • {linkedExpense ? linkedLabel(linkedExpense).category : (trans.category || 'Ukategorisert')}</span>
+                            {isCountedInOtherMonth(trans) && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider" title={countedInTitle(trans)}>{countedInLabel(trans)}</span>
+                            )}
+                            {linkedExpense && (
+                                <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                    <Link2 className="w-3 h-3 flex-shrink-0" />{linkedLabel(linkedExpense).name}
+                                </span>
+                            )}
+                            {linkedProject && (
+                                <span className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400">
+                                    <FolderKanban className="w-3 h-3 flex-shrink-0" />{linkedProject.name}
+                                </span>
+                            )}
+                            {trans.currency && trans.currency !== 'NOK' && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 text-[10px] font-bold uppercase tracking-wider" title="Beløpet er i utenlandsk valuta og er omtrentlig — banken fører det vekslede NOK-beløpet senere. Slå sammen med banktransaksjonen når den kommer.">{trans.currency} ~</span>
+                            )}
+                            {trans.originalCurrency && (
+                                <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400" title="Opprinnelig beløp betalt i utenlandsk valuta">
+                                    {(trans.originalAmount ?? 0).toLocaleString('no-NO')} {trans.originalCurrency} betalt
+                                </span>
+                            )}
+                            {trans.paidPrivatelyBy && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider" title={trans.type === 'income'
+                                    ? 'Felles innbetaling mottatt på egen konto — beløpet legges til det du skal overføre til felleskontoen'
+                                    : 'Felles utgift betalt fra egen konto — beløpet trekkes fra det du skal overføre til felleskontoen'}>{trans.type === 'income' ? 'Mottatt privat' : 'Utlegg'}</span>
+                            )}
+                            {trans.refundSplit && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title="Innbetalingen er fordelt på flere kjøp — beløpet telles via de fordelte radene, ikke denne">
+                                    <Undo2 className="w-3 h-3 flex-shrink-0" />Fordelt på {splitChildren} kjøp
+                                </span>
+                            )}
+                            {trans.isRefund && !trans.refundSplit && (
+                                <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Refusjon av ${refundOriginal.name} (${refundOriginal.date})${trans.refundParentId ? ' — del av en fordelt innbetaling' : ''}` : 'Refusjon uten kobling til et kjøp'}>
+                                    <Undo2 className="w-3 h-3 flex-shrink-0" />Refusjon{refundOriginal ? ` av ${refundOriginal.name}` : ''}{trans.refundParentId ? ' (del)' : ''}
+                                </span>
+                            )}
+                            {trans.awaitingRefund && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title={`Venter på innkommende refusjon (Vipps e.l.). Forventet ${refundExpected.toLocaleString('no-NO')} kr${refundedAmount > 0 ? `, mottatt ${refundedAmount.toLocaleString('no-NO')} kr` : ''}. Knytt innbetalingen i avstemmingsdialogen.`}>
+                                    <Undo2 className="w-3 h-3 flex-shrink-0" />Venter refusjon{refundedAmount > 0 ? ` · ${refundedAmount.toLocaleString('no-NO')} av ${refundExpected.toLocaleString('no-NO')}` : ''}
+                                </span>
+                            )}
+                            {coverGroupById.has(trans.id) && (() => {
+                                const g = coverGroupById.get(trans.id);
+                                const ok = g.status === 'ok';
+                                const sums = `Inn ${g.in.toLocaleString('no-NO')} kr, ut ${g.out.toLocaleString('no-NO')} kr.`;
+                                const title = g.status === 'missing'
+                                    ? 'Merket som gjennomreise, men ingen innbetaling er koblet. Åpne raden og koble innbetalingen — eller fjern merkingen.'
+                                    : g.status === 'mismatch'
+                                        ? `Gjennomreise: innbetalingen(e) og overføringen(e) stemmer ikke overens. ${sums}`
+                                        : `Penger på gjennomreise — holdes utenfor oppgjør og overføringsberegninger. ${sums}`;
+                                return (
+                                    <span className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider',
+                                        ok ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300')} title={title}>
+                                        {ok ? <ArrowLeftRight className="w-3 h-3 flex-shrink-0" /> : <AlertTriangle className="w-3 h-3 flex-shrink-0" />}
+                                        {COVER_STATUS_LABEL[g.status]}
+                                    </span>
+                                );
+                            })()}
+                            {!trans.awaitingRefund && refundedAmount > 0 && (
+                                <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundedAmount > trans.amount ? 'Mer refundert enn kjøpet kostet — overskytende gjør netto negativt' : 'Hele eller deler av beløpet er refundert'}>
+                                    <Undo2 className="w-3 h-3 flex-shrink-0" />{refundedAmount.toLocaleString('no-NO')} kr refundert{refundedAmount > trans.amount ? ' (overrefundert)' : ''}
+                                </span>
+                            )}
+                            {hasReceipt && (
+                                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400" title="Kvittering med varelinjer er koblet">
+                                    <ReceiptText className="w-3 h-3 flex-shrink-0" />Kvittering
+                                </span>
+                            )}
+                            {reconcileState(trans) === 'reconciled'
+                                ? <span className="text-green-600 dark:text-green-400" title="Knyttet til en budsjettpost og bekreftet mot banken — rader importert fra banken blir avstemt i det de knyttes">✓ Avstemt</span>
+                                : reconcileState(trans) === 'booked'
+                                    ? <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-bold uppercase tracking-wider" title="Bokført, men ikke matchet mot en banktransaksjon ennå — avstemmes når bankens kopi kommer inn via import">Bokført</span>
+                                    : <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider" title="Ikke knyttet til en budsjettpost ennå, så beløpet teller ikke i forbruket — trykk blyanten for å avstemme">Uavstemt</span>}
+                        </div>
+                        {trans.comment && (
+                            <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 italic">💬 {trans.comment}</div>
+                        )}
+                    </div>
+                </div>
+                <div className="flex items-center space-x-4">
+                    <div className={clsx('font-bold', trans.type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
+                        {trans.type === 'income' ? '+' : '-'}{trans.amount.toLocaleString('no-NO')} {trans.currency && trans.currency !== 'NOK' ? trans.currency : 'kr'}
+                    </div>
+                    <div className="flex space-x-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <button onClick={(e) => handleEditTransaction(e, trans)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                            <Edit2 className="w-4 h-4" />
+                        </button>
+                        {!nested && (
+                            <button onClick={(e) => { e.stopPropagation(); setMergeTarget(trans); }} title="Slå sammen med duplikat" className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors">
+                                <Merge className="w-4 h-4" />
+                            </button>
+                        )}
+                        {!nested && (
+                            <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation({ isOpen: true, id: trans.id, type: 'transaction' }); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -324,126 +467,12 @@ export default function TransactionsPanel({
                 </div>
                 <div className="divide-y divide-gray-100 dark:divide-gray-700">
                     {displayedTransactions.length > 0 ? (
-                        displayedTransactions.map(trans => {
-                            const linkedExpense = trans.budgetItemId ? expenses.find(e => e.id === trans.budgetItemId) : null;
-                            const linkedProject = trans.projectId ? projects.find(p => p.id === trans.projectId) : null;
-                            const hasReceipt = !!trans.receiptId || receipts.some(r => r.transactionId === trans.id);
-                            const refundOriginal = trans.isRefund && trans.refundOfTransactionId ? transactions.find(t => t.id === trans.refundOfTransactionId) : null;
-                            const refundedAmount = refundedByOriginal.get(trans.id) || 0;
-                            const splitChildren = trans.refundSplit ? transactions.filter(t => t.refundParentId === trans.id).length : 0;
-                            const refundExpected = trans.expectedRefundAmount > 0 ? trans.expectedRefundAmount : trans.amount;
-                            return (
-                                <div key={trans.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group">
-                                    <div className="flex items-center space-x-4">
-                                        <div className={clsx('w-10 h-10 rounded-full flex items-center justify-center',
-                                            trans.type === 'income' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400')}>
-                                            {trans.type === 'income' ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
-                                        </div>
-                                        <div>
-                                            <div className="font-medium text-gray-900 dark:text-gray-100">
-                                                {trans.name}
-                                                {exclusionReason(trans, accounts, allProjects) && <span className="ml-1 text-orange-500" title={EXCLUSION_LABEL[exclusionReason(trans, accounts, allProjects)]}>*</span>}
-                                            </div>
-                                            <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
-                                                <span>{trans.date} • {linkedExpense ? linkedLabel(linkedExpense).category : (trans.category || 'Ukategorisert')}</span>
-                                                {isCountedInOtherMonth(trans) && (
-                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider" title={countedInTitle(trans)}>{countedInLabel(trans)}</span>
-                                                )}
-                                                {linkedExpense && (
-                                                    <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                                                        <Link2 className="w-3 h-3 flex-shrink-0" />{linkedLabel(linkedExpense).name}
-                                                    </span>
-                                                )}
-                                                {linkedProject && (
-                                                    <span className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400">
-                                                        <FolderKanban className="w-3 h-3 flex-shrink-0" />{linkedProject.name}
-                                                    </span>
-                                                )}
-                                                {trans.currency && trans.currency !== 'NOK' && (
-                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 text-[10px] font-bold uppercase tracking-wider" title="Beløpet er i utenlandsk valuta og er omtrentlig — banken fører det vekslede NOK-beløpet senere. Slå sammen med banktransaksjonen når den kommer.">{trans.currency} ~</span>
-                                                )}
-                                                {trans.originalCurrency && (
-                                                    <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400" title="Opprinnelig beløp betalt i utenlandsk valuta">
-                                                        {(trans.originalAmount ?? 0).toLocaleString('no-NO')} {trans.originalCurrency} betalt
-                                                    </span>
-                                                )}
-                                                {trans.paidPrivatelyBy && (
-                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider" title={trans.type === 'income'
-                                                        ? 'Felles innbetaling mottatt på egen konto — beløpet legges til det du skal overføre til felleskontoen'
-                                                        : 'Felles utgift betalt fra egen konto — beløpet trekkes fra det du skal overføre til felleskontoen'}>{trans.type === 'income' ? 'Mottatt privat' : 'Utlegg'}</span>
-                                                )}
-                                                {trans.refundSplit && (
-                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title="Innbetalingen er fordelt på flere kjøp — beløpet telles via de fordelte radene, ikke denne">
-                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Fordelt på {splitChildren} kjøp
-                                                    </span>
-                                                )}
-                                                {trans.isRefund && !trans.refundSplit && (
-                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Refusjon av ${refundOriginal.name} (${refundOriginal.date})${trans.refundParentId ? ' — del av en fordelt innbetaling' : ''}` : 'Refusjon uten kobling til et kjøp'}>
-                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Refusjon{refundOriginal ? ` av ${refundOriginal.name}` : ''}{trans.refundParentId ? ' (del)' : ''}
-                                                    </span>
-                                                )}
-                                                {trans.awaitingRefund && (
-                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title={`Venter på innkommende refusjon (Vipps e.l.). Forventet ${refundExpected.toLocaleString('no-NO')} kr${refundedAmount > 0 ? `, mottatt ${refundedAmount.toLocaleString('no-NO')} kr` : ''}. Knytt innbetalingen i avstemmingsdialogen.`}>
-                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />Venter refusjon{refundedAmount > 0 ? ` · ${refundedAmount.toLocaleString('no-NO')} av ${refundExpected.toLocaleString('no-NO')}` : ''}
-                                                    </span>
-                                                )}
-                                                {coverGroupById.has(trans.id) && (() => {
-                                                    const g = coverGroupById.get(trans.id);
-                                                    const ok = g.status === 'ok';
-                                                    const sums = `Inn ${g.in.toLocaleString('no-NO')} kr, ut ${g.out.toLocaleString('no-NO')} kr.`;
-                                                    const title = g.status === 'missing'
-                                                        ? 'Merket som gjennomreise, men ingen innbetaling er koblet. Åpne raden og koble innbetalingen — eller fjern merkingen.'
-                                                        : g.status === 'mismatch'
-                                                            ? `Gjennomreise: innbetalingen(e) og overføringen(e) stemmer ikke overens. ${sums}`
-                                                            : `Penger på gjennomreise — holdes utenfor oppgjør og overføringsberegninger. ${sums}`;
-                                                    return (
-                                                        <span className={clsx('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider',
-                                                            ok ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300')} title={title}>
-                                                            {ok ? <ArrowLeftRight className="w-3 h-3 flex-shrink-0" /> : <AlertTriangle className="w-3 h-3 flex-shrink-0" />}
-                                                            {COVER_STATUS_LABEL[g.status]}
-                                                        </span>
-                                                    );
-                                                })()}
-                                                {!trans.awaitingRefund && refundedAmount > 0 && (
-                                                    <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundedAmount > trans.amount ? 'Mer refundert enn kjøpet kostet — overskytende gjør netto negativt' : 'Hele eller deler av beløpet er refundert'}>
-                                                        <Undo2 className="w-3 h-3 flex-shrink-0" />{refundedAmount.toLocaleString('no-NO')} kr refundert{refundedAmount > trans.amount ? ' (overrefundert)' : ''}
-                                                    </span>
-                                                )}
-                                                {hasReceipt && (
-                                                    <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400" title="Kvittering med varelinjer er koblet">
-                                                        <ReceiptText className="w-3 h-3 flex-shrink-0" />Kvittering
-                                                    </span>
-                                                )}
-                                                {reconcileState(trans) === 'reconciled'
-                                                    ? <span className="text-green-600 dark:text-green-400" title="Knyttet til en budsjettpost og bekreftet mot banken — rader importert fra banken blir avstemt i det de knyttes">✓ Avstemt</span>
-                                                    : reconcileState(trans) === 'booked'
-                                                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-bold uppercase tracking-wider" title="Bokført, men ikke matchet mot en banktransaksjon ennå — avstemmes når bankens kopi kommer inn via import">Bokført</span>
-                                                        : <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider" title="Ikke knyttet til en budsjettpost ennå, så beløpet teller ikke i forbruket — trykk blyanten for å avstemme">Uavstemt</span>}
-                                            </div>
-                                            {trans.comment && (
-                                                <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5 italic">💬 {trans.comment}</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center space-x-4">
-                                        <div className={clsx('font-bold', trans.type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
-                                            {trans.type === 'income' ? '+' : '-'}{trans.amount.toLocaleString('no-NO')} {trans.currency && trans.currency !== 'NOK' ? trans.currency : 'kr'}
-                                        </div>
-                                        <div className="flex space-x-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                            <button onClick={(e) => handleEditTransaction(e, trans)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                                                <Edit2 className="w-4 h-4" />
-                                            </button>
-                                            <button onClick={(e) => { e.stopPropagation(); setMergeTarget(trans); }} title="Slå sammen med duplikat" className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors">
-                                                <Merge className="w-4 h-4" />
-                                            </button>
-                                            <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmation({ isOpen: true, id: trans.id, type: 'transaction' }); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })
+                        rows.map(({ row, children }) => (
+                            <div key={row.id}>
+                                {renderRow(row)}
+                                {children.map(c => renderRow(c, true))}
+                            </div>
+                        ))
                     ) : (
                         <div className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                             {activeFilters.length > 0
