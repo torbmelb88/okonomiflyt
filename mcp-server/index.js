@@ -94,6 +94,19 @@ function coveredByAccountOf(t, projectsById) {
 // coveredByIncoming + coveredByTransactionIds; incomes store nothing. Groups
 // are connected components, checked by sum: 'ok' | 'missing' | 'mismatch'.
 const coverLinkIds = (t) => Array.isArray(t?.coveredByTransactionIds) ? t.coveredByTransactionIds : [];
+// Mirrors isCoverNeutral/coveringIncomeIds in utils/coverage.js: a covered
+// expense, or an income some covered expense names, is pass-through money and
+// stays out of the settlement. `covering` is the Set of income ids referenced
+// by covered expenses — built from ALL covered expenses, not just the month's,
+// since a payment may land the month before the transfer it funds.
+function coveringIncomeIds(coveredExpenses) {
+    const ids = new Set();
+    for (const t of coveredExpenses) if (t.type === 'expense' && t.coveredByIncoming) coverLinkIds(t).forEach(id => ids.add(id));
+    return ids;
+}
+const isCoverNeutral = (t, covering) =>
+    (t.type === 'expense' && !!t.coveredByIncoming) || (t.type === 'income' && covering.has(t.id));
+
 function coverIndex(all) {
     const byId = new Map(all.map(t => [t.id, t]));
     const index = new Map();
@@ -147,12 +160,11 @@ function txView(t, accountsById, expensesById, budgetsById, projectsById, coverB
     if (t.externalId) view.externalId = t.externalId;
     if (t.paidPrivatelyBy) view.paidPrivatelyBy = t.paidPrivatelyBy;
     // Oppgjør flags (mirror Oppgjor.jsx): excluded rows never enter the split;
-    // coveredByAccount says which account footed the bill; payer overrides the split.
+    // coveredByAccount says which account footed the bill.
     const excluded = exclusionReason(t, accountsById, projectsById);
     if (excluded && excluded !== 'account') { view.excludeFromSharedCalc = true; view.excludedBy = excluded; }
     const coverId = coveredByAccountOf(t, projectsById);
     if (coverId) view.coveredByAccount = accountsById.get(coverId)?.name || coverId;
-    if (t.payer && t.payer !== 'shared') view.payer = t.payer;
     if (t.isRefund) view.isRefund = true;
     if (t.refundSplit) view.refundSplit = true; // parent of a refund split across purchases; its children carry the amounts
     if (t.refundParentId) view.refundParentId = t.refundParentId;
@@ -318,7 +330,7 @@ function buildServer() {
 
     server.registerTool('list_transactions', {
         title: 'List transactions',
-        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`excludedBy` says whether the row itself or its project holds it out; `coveredByAccount` names the account that covered it); `payer` (self/partner) assigns the row to one person instead of the split. `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. `gjennomreise` (pass-through money: a transfer funded by an incoming payment) gives the whole linked group with status ok/missing/mismatch and the in/out sums. `month` is the month the row is COUNTED in (oppgjør, budget, summaries); it normally equals the month of the date, but a bill can deliberately be counted in the month before or after its payment date («Telles i»), so filter and sum by `month`, never by `date`. Sorted newest first.',
+        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`excludedBy` says whether the row itself or its project holds it out; `coveredByAccount` names the account that covered it); `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. `gjennomreise` (pass-through money: a transfer funded by an incoming payment) gives the whole linked group with status ok/missing/mismatch and the in/out sums. `month` is the month the row is COUNTED in (oppgjør, budget, summaries); it normally equals the month of the date, but a bill can deliberately be counted in the month before or after its payment date («Telles i»), so filter and sum by `month`, never by `date`. Sorted newest first.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM. Strongly recommended to limit the result.'),
             budgetId: z.string().optional(),
@@ -602,14 +614,19 @@ function bufferContributionPerParty(plan, month, parties) {
     return Math.ceil((plan.monthlyTotal || 0) / Math.max(1, parties || 2));
 }
 
-// Mirrors the split in src/components/oppgjor/Oppgjor.jsx: per-person
-// settlement for one month. "owner" is the budget's owner member (the app's
-// "Du"); with 5050/custom splits the uid never matters. The app's roundingMode
-// lives in browser localStorage, so it is a constant here — 100 (round up to
-// the nearest hundred), verified against the app 2026-08-21.
+// Mirrors computeSplit in src/utils/settlement.js — the one computation
+// Oppgjør and Min Oversikt show — per-person settlement for one month: shared
+// rows on a budget line, not held out (row/project/account) and not
+// gjennomreise, split by the budget's method, minus each party's utlegg,
+// rounded up. The buffer plan's per-party extra is added on top (the app shows
+// it as a separate line under the same amount). "owner" is the budget's owner
+// member (the app's "Du"); with 5050/custom splits the uid never matters. The
+// app's roundingMode lives in browser localStorage, so it is a constant here
+// — 100 (round up to the nearest hundred), verified against the app 2026-08-21.
+// `covering` is coveringIncomeIds() over every covered expense.
 const ROUNDING_MODE = 100;
 
-function computeOppgjor({ shared, accounts, projects = [], txs, month }) {
+function computeOppgjor({ shared, accounts, projects = [], txs, month, covering = new Set() }) {
     const members = shared.members || [];
     const owner = members.find(m => m.role === 'owner') || members[0] || null;
     const partner = members.find(m => m !== owner) || null;
@@ -617,11 +634,10 @@ function computeOppgjor({ shared, accounts, projects = [], txs, month }) {
 
     const accountsById = new Map(accounts.map(a => [a.id, a]));
     const projectsById = new Map(projects.map(p => [p.id, p]));
-    const splitTx = txs.filter(t => t.budgetItemId && !exclusionReason(t, accountsById, projectsById));
+    const splitTx = txs.filter(t =>
+        t.budgetItemId && !exclusionReason(t, accountsById, projectsById) && !isCoverNeutral(t, covering));
     const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
-    const totalSharedActual = sum(splitTx.filter(t => !t.payer || t.payer === 'shared'));
-    const selfActual = sum(splitTx.filter(t => t.payer === 'self'));
-    const partnerActual = sum(splitTx.filter(t => t.payer === 'partner'));
+    const totalSharedActual = sum(splitTx);
     const utleggSelf = sum(splitTx.filter(t => t.paidPrivatelyBy === 'self'));
     const utleggPartner = sum(splitTx.filter(t => t.paidPrivatelyBy === 'partner'));
 
@@ -640,8 +656,8 @@ function computeOppgjor({ shared, accounts, projects = [], txs, month }) {
         (s, a) => s + bufferContributionPerParty(a.bufferPlan, month, parties), 0
     );
 
-    const rawUser = totalSharedActual * userShare + selfActual - utleggSelf;
-    const rawPartner = totalSharedActual * (1 - userShare) + partnerActual - utleggPartner;
+    const rawUser = totalSharedActual * userShare - utleggSelf;
+    const rawPartner = totalSharedActual * (1 - userShare) - utleggPartner;
     const roundAmount = (raw) => ROUNDING_MODE > 1
         ? Math.ceil(raw / ROUNDING_MODE) * ROUNDING_MODE
         : Math.round(raw);
@@ -654,7 +670,7 @@ function computeOppgjor({ shared, accounts, projects = [], txs, month }) {
         bufferPerParty,
         utleggOwner: Math.round(utleggSelf * 100) / 100,
         utleggPartner: Math.round(utleggPartner * 100) / 100,
-        totalSharedConsumption: Math.round((totalSharedActual + selfActual + partnerActual) * 100) / 100,
+        totalSharedConsumption: Math.round(totalSharedActual * 100) / 100,
     };
 }
 
@@ -698,11 +714,13 @@ export const ha = onRequest({
         // Last month is what gets settled now: its per-party amounts are the
         // ones worth showing, and `reconciled` says whether they are final.
         const prevMonth = (() => { const [y, m] = month.split('-').map(Number); const d = new Date(Date.UTC(y, m - 2, 1)); return d.toISOString().slice(0, 7); })();
-        const [txs, prevTxs, prevStatuses] = await Promise.all([
+        const [txs, prevTxs, prevStatuses, coveredExpenses] = await Promise.all([
             queryEq('transactions', { month, budgetId: shared.id }),
             queryEq('transactions', { month: prevMonth, budgetId: shared.id }),
             queryEq('monthStatuses', { month: prevMonth }),
+            queryEq('transactions', { coveredByIncoming: true }), // gjennomreise links span months
         ]);
+        const covering = coveringIncomeIds(coveredExpenses);
         const lineActual = (name) => {
             const line = expenses.find(e =>
                 e.budgetId === shared.id && (e.name || '').trim().toLowerCase() === name
@@ -720,9 +738,9 @@ export const ha = onRequest({
                 budget: shared.name,
                 dagligvarer: lineActual('dagligvarer'),
             },
-            oppgjor: computeOppgjor({ shared, accounts, projects, txs, month }),
+            oppgjor: computeOppgjor({ shared, accounts, projects, txs, month, covering }),
             oppgjorForrigeMaaned: {
-                ...computeOppgjor({ shared, accounts, projects, txs: prevTxs, month: prevMonth }),
+                ...computeOppgjor({ shared, accounts, projects, txs: prevTxs, month: prevMonth, covering }),
                 reconciled: prevStatuses.some(ms => ms.reconciled),
             },
         });
