@@ -142,27 +142,40 @@ export function createDemoDb() {
         { id: 'def-sparing', name: 'Fast sparing', categoryId: 'cat-sparing', scope: 'private', ownerId: demoUser.uid }
     ];
 
+    // Per-budget instances carry no amount — planned amounts are per month
+    // in monthlyBudgets below.
     const expenses = [
         // Shared budget
-        { id: 'exp-husleie', budgetId: 'budget-shared', defId: 'def-husleie', name: 'Husleie', category: 'Bolig', amount: 12000, monthlyAmount: 12000, frequency: 'monthly' },
-        { id: 'exp-strom', budgetId: 'budget-shared', defId: 'def-strom', name: 'Strøm', category: 'Bolig', amount: 1100, monthlyAmount: 1100, frequency: 'monthly' },
-        { id: 'exp-mat', budgetId: 'budget-shared', defId: 'def-mat', name: 'Dagligvarer', category: 'Mat og drikke', amount: 6500, monthlyAmount: 6500, frequency: 'monthly' },
-        { id: 'exp-internett', budgetId: 'budget-shared', defId: 'def-internett', name: 'Internett', category: 'Abonnementer', amount: 599, monthlyAmount: 599, frequency: 'monthly' },
+        { id: 'exp-husleie', budgetId: 'budget-shared', defId: 'def-husleie', name: 'Husleie', category: 'Bolig' },
+        { id: 'exp-strom', budgetId: 'budget-shared', defId: 'def-strom', name: 'Strøm', category: 'Bolig' },
+        { id: 'exp-mat', budgetId: 'budget-shared', defId: 'def-mat', name: 'Dagligvarer', category: 'Mat og drikke' },
+        { id: 'exp-internett', budgetId: 'budget-shared', defId: 'def-internett', name: 'Internett', category: 'Abonnementer' },
         // Personal budget
-        { id: 'exp-streaming', budgetId: 'budget-personal', defId: 'def-streaming', name: 'Streaming', category: 'Abonnementer', amount: 328, monthlyAmount: 328, frequency: 'monthly' },
-        { id: 'exp-mobil', budgetId: 'budget-personal', defId: 'def-mobil', name: 'Mobilabonnement', category: 'Abonnementer', amount: 329, monthlyAmount: 329, frequency: 'monthly' },
-        { id: 'exp-trening', budgetId: 'budget-personal', defId: 'def-trening', name: 'Trening', category: 'Annet', amount: 449, monthlyAmount: 449, frequency: 'monthly' },
-        { id: 'exp-drivstoff', budgetId: 'budget-personal', defId: 'def-drivstoff', name: 'Drivstoff', category: 'Transport', amount: 1500, monthlyAmount: 1500, frequency: 'monthly' },
-        { id: 'exp-forsikring', budgetId: 'budget-personal', defId: 'def-forsikring', name: 'Forsikring bil', category: 'Transport', amount: 1150, monthlyAmount: 1150, frequency: 'monthly' },
-        { id: 'exp-sparing', budgetId: 'budget-personal', defId: 'def-sparing', name: 'Fast sparing', category: 'Sparing', amount: 3000, monthlyAmount: 3000, frequency: 'monthly' },
+        { id: 'exp-streaming', budgetId: 'budget-personal', defId: 'def-streaming', name: 'Streaming', category: 'Abonnementer' },
+        { id: 'exp-mobil', budgetId: 'budget-personal', defId: 'def-mobil', name: 'Mobilabonnement', category: 'Abonnementer' },
+        { id: 'exp-trening', budgetId: 'budget-personal', defId: 'def-trening', name: 'Trening', category: 'Annet' },
+        { id: 'exp-drivstoff', budgetId: 'budget-personal', defId: 'def-drivstoff', name: 'Drivstoff', category: 'Transport' },
+        { id: 'exp-forsikring', budgetId: 'budget-personal', defId: 'def-forsikring', name: 'Forsikring bil', category: 'Transport' },
+        { id: 'exp-sparing', budgetId: 'budget-personal', defId: 'def-sparing', name: 'Fast sparing', category: 'Sparing' },
         // Virtual line: the personal budget's share of the shared budget
-        { id: 'exp-virtual', budgetId: 'budget-personal', name: 'Min andel felles', category: 'Felles', amount: 10900, monthlyAmount: 10900, frequency: 'monthly', isVirtual: true }
+        { id: 'exp-virtual', budgetId: 'budget-personal', name: 'Min andel felles', category: 'Felles', isVirtual: true }
     ];
 
-    const monthlyBudgets = [
-        // Example of a per-month override: cheaper electricity last month
-        { id: 'mb-1', budgetId: 'budget-shared', expenseId: 'exp-strom', month: m1, amount: 950 }
-    ];
+    // Planned amount per instance per month (the same three months the
+    // transactions cover). Electricity was planned cheaper last month.
+    const plannedAmounts = {
+        'exp-husleie': 12000, 'exp-strom': 1100, 'exp-mat': 6500, 'exp-internett': 599,
+        'exp-streaming': 328, 'exp-mobil': 329, 'exp-trening': 449, 'exp-drivstoff': 1500,
+        'exp-forsikring': 1150, 'exp-sparing': 3000, 'exp-virtual': 10900,
+    };
+    const monthlyBudgets = [];
+    for (const [expenseId, amount] of Object.entries(plannedAmounts)) {
+        const budgetId = expenses.find(e => e.id === expenseId).budgetId;
+        for (const month of [m2, m1, m0]) {
+            const planned = expenseId === 'exp-strom' && month === m1 ? 950 : amount;
+            monthlyBudgets.push({ id: `mb-${expenseId}-${month}`, budgetId, expenseId, month, amount: planned });
+        }
+    }
 
     const monthStatuses = [
         { id: 'ms-1', budgetId: 'budget-shared', month: m2, reconciled: true, reconciledAt: `${dateIn(-1, 3)}T18:00:00.000Z` },

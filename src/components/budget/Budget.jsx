@@ -1,12 +1,11 @@
 import { useBudget } from '../../contexts/BudgetContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
-import { DollarSign, Users, ArrowRight, Plus, Calendar, RotateCcw, History, List } from 'lucide-react';
+import { DollarSign, Users, ArrowRight, CalendarDays, List } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import AddBudgetItemModal from './AddBudgetItemModal';
 import BudgetItemDetailsModal from './BudgetItemDetailsModal';
-import AnnualBudgetPlannerModal from './AnnualBudgetPlannerModal';
+import BudgetItemHistoryModal from './BudgetItemHistoryModal';
 import BudgetToggle from '../common/BudgetToggle';
 import { isVirtualExpense, SCOPE_LABEL } from '../../utils/categoryMigration';
 import { computeSplit, readRoundingMode } from '../../utils/settlement';
@@ -35,23 +34,25 @@ function BudgetAmountInput({ value, onCommit, className }) {
  * every budget item with its planned amount (editable), what was actually
  * spent (transactions linked to it, refunds net) and the difference.
  *
- * Budget items are auto-included from the owner-level library by scope; the
- * amount lives on a per-budget instance (expense) materialized lazily the
- * first time an amount is set. Items flagged «utenfor statistikk» stay in
- * the table (greyed) but out of the totals and the pie, so the one total
- * here means the same as it did on the old Forbruk page.
+ * Budget items are created in Innstillinger and auto-included here by scope.
+ * The planned amount is per month only (monthlyBudgets) — there is no
+ * standard amount on the item, so a figure typed into one month never leaks
+ * into another. The calendar button next to the amount shows the last year's
+ * actual spending on the item (and the average) to base the plan on. The
+ * per-budget instance (expense) is materialized lazily the first time an
+ * amount is set or a transaction is linked. Items flagged «utenfor
+ * statistikk» stay in the table (greyed) but out of the totals and the pie.
  */
 export default function Budget() {
     const { notify } = useDialog();
     const {
         activeBudget, expenses, transactions, allTransactions, categories, budgetItemDefs, loading, accounts, allProjects, sharedBudget,
-        addCategory, addBudgetItemDef, addExpense, getMonthlyBudget, setMonthlyBudget, deleteMonthlyBudget,
+        addExpense, getMonthlyBudget, setMonthlyBudget,
     } = useBudget();
     const { currentUser } = useAuth();
 
-    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [selectedBudgetItem, setSelectedBudgetItem] = useState(null);
-    const [isAnnualPlannerOpen, setIsAnnualPlannerOpen] = useState(false);
+    const [historyRow, setHistoryRow] = useState(null);
     const [pieMode, setPieMode] = useState('actual'); // 'plan' | 'actual'
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
@@ -80,12 +81,6 @@ export default function Budget() {
         const newDate = new Date(year, month - 1 + delta);
         setSelectedMonth(`${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`);
     };
-    const getPreviousMonth = (monthStr) => {
-        const [year, month] = monthStr.split('-');
-        const date = new Date(year, parseInt(month) - 2);
-        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    };
-
     // «Utenfor statistikk» on the def or its category (Innstillinger)
     const defExcluded = (def) => {
         if (!def) return false;
@@ -104,12 +99,12 @@ export default function Budget() {
     const eligibleDefs = budgetItemDefs.filter(d => d.scope === 'both' || d.scope === budgetScope);
     const defRows = eligibleDefs.map(def => {
         const inst = expenses.find(e => e.defId === def.id && !isVirtualExpense(e));
-        const mb = inst ? getMonthlyBudget(inst.id, selectedMonth) : { amount: 0, isOverride: false };
+        const budgetedAmount = inst ? getMonthlyBudget(inst.id, selectedMonth).amount : 0;
         const { actual, count } = inst ? actualFor(inst.id) : { actual: 0, count: 0 };
         return {
             key: `def-${def.id}`, defId: def.id, instId: inst?.id || null,
             name: def.name, category: catName(def.categoryId), scope: def.scope,
-            budgetedAmount: mb.amount, isOverride: mb.isOverride, materialized: !!inst, isVirtual: false,
+            budgetedAmount, isVirtual: false,
             actual, count, excluded: defExcluded(def),
         };
     });
@@ -119,13 +114,12 @@ export default function Budget() {
     const usedInstIds = new Set(defRows.filter(r => r.instId).map(r => r.instId));
     const extraRows = expenses.filter(e => !usedInstIds.has(e.id)).map(e => {
         const def = e.defId ? budgetItemDefs.find(d => d.id === e.defId) : null;
-        const mb = getMonthlyBudget(e.id, selectedMonth);
         const virtual = isVirtualExpense(e);
         const { actual, count } = virtual ? { actual: split.userAmount, count: split.rows.length } : actualFor(e.id);
         return {
             key: `exp-${e.id}`, defId: e.defId || null, instId: virtual ? null : e.id,
             name: e.name, category: virtual ? 'Felles' : (def ? catName(def.categoryId) : (e.category || 'Annet')), scope: def?.scope || null,
-            budgetedAmount: mb.amount, isOverride: mb.isOverride, materialized: !virtual, isVirtual: virtual,
+            budgetedAmount: getMonthlyBudget(e.id, selectedMonth).amount, isVirtual: virtual,
             actual, count, excluded: defExcluded(def),
         };
     });
@@ -148,48 +142,20 @@ export default function Budget() {
         .filter(d => d.value > 0);
     if (pieData.length === 0) pieData.push({ name: 'Ingen data', value: 1, color: '#e5e7eb' });
 
+    // Sets this month's planned amount for the row (0 removes it). The
+    // per-budget instance is created on the fly for a def that has none yet.
     const commitAmount = async (row, newAmount) => {
         if (row.isVirtual) return;
         try {
-            if (row.materialized) {
-                await setMonthlyBudget(row.instId, selectedMonth, newAmount);
-            } else {
-                // Lazy-materialize the per-budget instance the first time an
-                // amount is set for an auto-included def.
-                await addExpense({ defId: row.defId, name: row.name, category: row.category, amount: newAmount, frequency: 'monthly' });
+            let instId = row.instId;
+            if (!instId) {
+                const ref = await addExpense({ defId: row.defId, name: row.name, category: row.category });
+                instId = ref?.id;
             }
+            if (instId) await setMonthlyBudget(instId, selectedMonth, newAmount);
         } catch (e) {
             console.error('Failed to set amount', e);
             notify({ message: 'Kunne ikke lagre beløp: ' + e.message, variant: 'error' });
-        }
-    };
-
-    const handleSetToPreviousActual = (row) => {
-        if (!row.materialized) return;
-        const prevMonth = getPreviousMonth(selectedMonth);
-        const target = transactions
-            .filter(t => t.budgetItemId === row.instId && t.month === prevMonth && t.type !== 'income')
-            .reduce((sum, t) => sum + t.amount, 0);
-        setMonthlyBudget(row.instId, selectedMonth, target);
-    };
-
-    const handleResetBudget = (row) => {
-        if (row.materialized) deleteMonthlyBudget(row.instId, selectedMonth);
-    };
-
-    const handleCreateBudgetItem = async ({ name, categoryId, newCategoryName, scope, amount }) => {
-        let catId = categoryId;
-        let catLabel = categories.find(c => c.id === catId)?.name;
-        if (!catId && newCategoryName) {
-            const cat = await addCategory(newCategoryName);
-            catId = cat.id;
-            catLabel = cat.name;
-        }
-        const def = await addBudgetItemDef({ name, categoryId: catId, scope });
-        // Materialize an instance in the active budget if its scope covers it
-        const coversActive = scope === 'both' || scope === budgetScope;
-        if (coversActive) {
-            await addExpense({ defId: def.id, name, category: catLabel || 'Annet', amount, frequency: 'monthly' });
         }
     };
 
@@ -206,13 +172,6 @@ export default function Budget() {
                     <Link to="/transaksjoner" className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm">
                         <List className="w-4 h-4" /><span className="hidden sm:inline">Til transaksjoner</span>
                     </Link>
-                    <button onClick={() => setIsAnnualPlannerOpen(true)} className="flex items-center justify-center w-10 h-10 bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" title="Årsplanlegger">
-                        <Calendar className="w-5 h-5" />
-                    </button>
-                    <button onClick={() => setIsAddModalOpen(true)} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm transition-colors">
-                        <Plus className="w-4 h-4" />
-                        <span>Ny budsjettpost</span>
-                    </button>
                 </div>
             </div>
 
@@ -237,7 +196,7 @@ export default function Budget() {
                                 <div className={clsx('font-bold text-lg', item.cls)}>{item.text}</div>
                             </div>
                         ))}
-                        <InfoTip text="Samme rader og samme filter for alle tre tallene: poster merket «utenfor statistikk» (Innstillinger) står i tabellen, men telles ikke. Brukt = transaksjoner knyttet til postene, refusjoner trukket fra; uavstemte transaksjoner er ikke med før de er avstemt. På et privat budsjett er «Min andel felles» din andel av fellesutgiftene denne måneden, samme tall som Oppgjør." />
+                        <InfoTip text="Plan legges inn måned for måned — et beløp gjelder bare måneden du står i. Kalenderknappen ved beløpet viser hva posten faktisk har kostet de siste 12 månedene, med gjennomsnitt. Budsjettposter opprettes i Innstillinger. Samme rader og samme filter for alle tre tallene: poster merket «utenfor statistikk» (Innstillinger) står i tabellen, men telles ikke. Brukt = transaksjoner knyttet til postene, refusjoner trukket fra; uavstemte transaksjoner er ikke med før de er avstemt. På et privat budsjett er «Min andel felles» din andel av fellesutgiftene denne måneden, samme tall som Oppgjør." />
                     </div>
                     <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors ml-2">
                         <ArrowRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -265,7 +224,7 @@ export default function Budget() {
                             return (
                                 <div key={row.key} className={clsx('px-4 md:px-6 py-3 grid grid-cols-12 gap-2 items-center', row.excluded && 'opacity-60')}>
                                     <button
-                                        onClick={() => row.instId && setSelectedBudgetItem(expenses.find(e => e.id === row.instId))}
+                                        onClick={() => row.instId && setSelectedBudgetItem({ ...expenses.find(e => e.id === row.instId), budgetedAmount: row.budgetedAmount })}
                                         disabled={!row.instId}
                                         className={clsx('col-span-12 md:col-span-5 flex items-center space-x-3 min-w-0 text-left', row.instId && 'hover:text-blue-600 dark:hover:text-blue-400')}
                                         title={row.instId ? 'Vis transaksjonene på posten' : undefined}
@@ -279,22 +238,17 @@ export default function Budget() {
                                                 {row.category}
                                                 {row.count > 0 && <span> · {row.count} transaksjoner</span>}
                                                 {row.scope === 'both' && <span className="ml-1 text-purple-500">· {SCOPE_LABEL.both}</span>}
-                                                {row.isOverride && <span className="ml-1 text-blue-500" title="Denne måneden har et eget beløp som overstyrer postens standardbeløp — pilen setter det tilbake">· overstyrt</span>}
-                                                {!row.materialized && !row.isVirtual && <span className="ml-1 text-gray-400" title="Posten finnes i biblioteket, men er ikke tatt i bruk i dette budsjettet ennå — skriv inn et beløp for å aktivere den">· ikke satt</span>}
                                                 {row.excluded && <span className="ml-1 text-gray-400" title="Merket «utenfor statistikk» i Innstillinger — telles ikke i summene eller kakediagrammet">· utenfor statistikk</span>}
                                             </div>
                                         </div>
                                     </button>
                                     <div className="col-span-6 md:col-span-3 flex items-center justify-end gap-1">
-                                        {row.materialized && (
-                                            <>
-                                                <button onClick={() => handleSetToPreviousActual(row)} className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title="Sett til forrige måneds forbruk">
-                                                    <History className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button onClick={() => handleResetBudget(row)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded transition-colors" title="Tilbakestill til standard">
-                                                    <RotateCcw className="w-3.5 h-3.5" />
-                                                </button>
-                                            </>
+                                        {!row.isVirtual && (
+                                            <button onClick={() => setHistoryRow(row)} disabled={!row.instId}
+                                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                                                title={row.instId ? 'Vis forbruket siste 12 måneder' : 'Ingen historikk ennå'}>
+                                                <CalendarDays className="w-4 h-4" />
+                                            </button>
                                         )}
                                         {row.isVirtual ? (
                                             <span className="w-24 text-right font-medium text-gray-700 dark:text-gray-300 pr-2">{fmt(row.budgetedAmount)} kr</span>
@@ -312,7 +266,7 @@ export default function Budget() {
                             );
                         }) : (
                             <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-                                Ingen budsjettposter for dette budsjettet ennå. Legg til én, eller opprett dem i Innstillinger → Kategorier &amp; budsjettposter.
+                                Ingen budsjettposter for dette budsjettet ennå. Opprett dem i Innstillinger → Kategorier &amp; budsjettposter.
                             </div>
                         )}
                     </div>
@@ -344,8 +298,7 @@ export default function Budget() {
                 </div>
             </div>
 
-            <AddBudgetItemModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onCreate={handleCreateBudgetItem} defaultScope={budgetScope} />
-            <AnnualBudgetPlannerModal isOpen={isAnnualPlannerOpen} onClose={() => setIsAnnualPlannerOpen(false)} />
+            <BudgetItemHistoryModal isOpen={!!historyRow} onClose={() => setHistoryRow(null)} row={historyRow} selectedMonth={selectedMonth} onUse={(amt) => commitAmount(historyRow, amt)} />
             <BudgetItemDetailsModal isOpen={!!selectedBudgetItem} onClose={() => setSelectedBudgetItem(null)} budgetItem={selectedBudgetItem} selectedMonth={selectedMonth} />
         </div>
     );

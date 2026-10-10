@@ -480,14 +480,14 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         }
     };
 
-    const handleNewBudgetItem = async ({ name, categoryId, newCategoryName, scope: newScope, amount }) => {
+    const handleNewBudgetItem = async ({ name, categoryId, newCategoryName, scope: newScope }) => {
         let catId = categoryId;
         if (!catId && newCategoryName) {
             const c = await addCategory(newCategoryName);
             catId = c.id;
         }
         const def = await addBudgetItemDef({ name, categoryId: catId, scope: newScope });
-        const instId = await ensureInstanceForDef(def, selectedBudgetId, amount);
+        const instId = await ensureInstanceForDef(def, selectedBudgetId);
         setIsAddOpen(false);
         setKind(KIND.purchase);
         setSelectedBudgetItemId(def.id);

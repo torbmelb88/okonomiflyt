@@ -230,18 +230,16 @@ export function BudgetProvider({ children }) {
         }
     };
 
+    // A per-budget instance of a budget item. It carries no amount: planned
+    // amounts live in `monthlyBudgets`, one row per month (see
+    // getMonthlyBudget). Legacy `amount`/`monthlyAmount` fields on old
+    // instances are ignored.
     const addExpense = async (expenseData) => {
         if (!activeBudgetId) return;
         try {
-            let monthlyAmount = expenseData.amount;
-            if (expenseData.frequency === 'yearly') {
-                monthlyAmount = expenseData.amount / 12;
-            }
-
             const newExpense = {
                 ...expenseData,
                 budgetId: activeBudgetId,
-                monthlyAmount: monthlyAmount,
                 createdAt: new Date().toISOString()
             };
 
@@ -258,15 +256,7 @@ export function BudgetProvider({ children }) {
     const updateExpense = async (id, expenseData) => {
         if (!activeBudgetId) return;
         try {
-            let monthlyAmount = expenseData.amount;
-            if (expenseData.frequency === 'yearly') {
-                monthlyAmount = expenseData.amount / 12;
-            }
-
-            const updatedExpense = {
-                ...expenseData,
-                monthlyAmount: monthlyAmount
-            };
+            const updatedExpense = { ...expenseData };
 
             await api.updateDocument('expenses', id, updatedExpense);
 
@@ -837,22 +827,11 @@ export function BudgetProvider({ children }) {
     const createBudgetItemFromTransaction = async (transaction, budgetItemData, projectId = null) => {
         try {
             // 1. Create the budget item (expense)
-            const expenseData = {
-                ...budgetItemData,
-                amount: 0, // Default to 0 as requested (manual first)
-                date: transaction.date,
-                month: transaction.month // Ensure month is passed
-            };
-
-            let monthlyAmount = expenseData.amount;
-            if (expenseData.frequency === 'yearly') {
-                monthlyAmount = expenseData.amount / 12;
-            }
-
             const newExpense = {
-                ...expenseData,
+                ...budgetItemData,
+                date: transaction.date,
+                month: transaction.month, // Ensure month is passed
                 budgetId: activeBudgetId,
-                monthlyAmount: monthlyAmount,
                 createdAt: new Date().toISOString()
             };
 
@@ -1013,18 +992,18 @@ export function BudgetProvider({ children }) {
     // to an auto-included def that has no amount set yet — the instance is
     // materialized lazily. Returns its id. Works cross-budget (the reconcile
     // budget selector can target another budget than the active one).
-    const ensureInstanceForDef = async (def, budgetId = activeBudgetId, amount = 0) => {
+    const ensureInstanceForDef = async (def, budgetId = activeBudgetId) => {
         const catName = categories.find(c => c.id === def.categoryId)?.name || 'Annet';
         if (budgetId === activeBudgetId) {
             const existing = expenses.find(e => e.defId === def.id);
             if (existing) return existing.id;
-            const ref = await addExpense({ defId: def.id, name: def.name, category: catName, amount, frequency: 'monthly' });
+            const ref = await addExpense({ defId: def.id, name: def.name, category: catName });
             return ref?.id;
         }
         const all = await api.getCollection('expenses');
         const existing = all.find(e => e.budgetId === budgetId && e.defId === def.id);
         if (existing) return existing.id;
-        const data = { budgetId, defId: def.id, name: def.name, category: catName, amount, monthlyAmount: amount, frequency: 'monthly', createdAt: new Date().toISOString() };
+        const data = { budgetId, defId: def.id, name: def.name, category: catName, createdAt: new Date().toISOString() };
         const ref = await api.addDocument('expenses', data);
         setAllExpenses(prev => [...prev, { id: ref.id, ...data }]);
         return ref.id;
@@ -1109,31 +1088,28 @@ export function BudgetProvider({ children }) {
         }
     };
 
-    // Monthly Budget Helpers
+    // --- Planned amounts: one `monthlyBudgets` row per instance per month ---
+    // There is no default/standard amount on the instance; a month without a
+    // row is simply unplanned (0). Setting 0 removes the row.
     const getMonthlyBudget = (expenseId, month) => {
-        const override = monthlyBudgets.find(mb => mb.expenseId === expenseId && mb.month === month);
-        if (override) {
-            return { amount: override.amount, isOverride: true, overrideId: override.id };
-        }
-        const expense = expenses.find(e => e.id === expenseId);
-        return { amount: expense?.monthlyAmount || expense?.amount || 0, isOverride: false, overrideId: null };
+        const row = monthlyBudgets.find(mb => mb.expenseId === expenseId && mb.month === month);
+        if (row) return { amount: row.amount, hasAmount: true, rowId: row.id };
+        return { amount: 0, hasAmount: false, rowId: null };
     };
 
     const setMonthlyBudget = async (expenseId, month, amount) => {
         if (!activeBudgetId) return;
+        if (!(amount > 0)) return deleteMonthlyBudget(expenseId, month);
 
         try {
-            // Check if override already exists
             const existing = monthlyBudgets.find(mb => mb.expenseId === expenseId && mb.month === month);
 
             if (existing) {
-                // Update existing override
                 await api.updateDocument('monthlyBudgets', existing.id, { amount });
                 setMonthlyBudgets(prev => prev.map(mb =>
                     mb.id === existing.id ? { ...mb, amount } : mb
                 ));
             } else {
-                // Create new override
                 const newOverride = {
                     budgetId: activeBudgetId,
                     expenseId,

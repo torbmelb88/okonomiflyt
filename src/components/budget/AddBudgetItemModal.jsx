@@ -7,15 +7,14 @@ import { useDialog } from '../../contexts/DialogContext';
 const SCOPES = ['both', 'shared', 'private'];
 
 /**
- * Create a new budget item. A budget item is a library definition
- * (name + category + scope) plus a per-budget instance carrying the amount.
- * Auto-inclusion then shows it in every budget its scope covers.
+ * Create a new budget item from the reconcile dialog: a library definition
+ * (name + category + scope). Auto-inclusion then shows it in every budget
+ * its scope covers; the planned amount is set per month on Budsjett.
  */
 export default function AddBudgetItemModal({ isOpen, onClose, onCreate, defaultScope = 'both' }) {
     const { notify } = useDialog();
     const { categories } = useBudget();
     const [name, setName] = useState('');
-    const [amount, setAmount] = useState('');
     const [categoryId, setCategoryId] = useState('');
     const [newCategoryName, setNewCategoryName] = useState('');
     const [scope, setScope] = useState(defaultScope);
@@ -24,7 +23,6 @@ export default function AddBudgetItemModal({ isOpen, onClose, onCreate, defaultS
     useEffect(() => {
         if (isOpen) {
             setName('');
-            setAmount('');
             setCategoryId(categories[0]?.id || '__new__');
             setNewCategoryName('');
             setScope(defaultScope);
@@ -46,7 +44,6 @@ export default function AddBudgetItemModal({ isOpen, onClose, onCreate, defaultS
                 categoryId: usingNew ? null : categoryId,
                 newCategoryName: usingNew ? newCategoryName.trim() : null,
                 scope,
-                amount: parseFloat(amount) || 0,
             });
             onClose();
         } catch (error) {
@@ -94,15 +91,7 @@ export default function AddBudgetItemModal({ isOpen, onClose, onCreate, defaultS
                         </div>
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Planlagt beløp (dette budsjettet)</label>
-                        <div className="relative">
-                            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0"
-                                className="w-full px-4 py-2 pl-8 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none dark:bg-gray-700 dark:text-white dark:placeholder-gray-400" />
-                            <span className="absolute left-3 top-2.5 text-gray-400 dark:text-gray-500 font-medium">kr</span>
-                        </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Beløpet gjelder kun dette budsjettet. Scope «Begge» viser posten i begge budsjett, men beløpene settes hver for seg.</p>
-                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Planlagt beløp legges inn måned for måned på Budsjett-siden. «Begge» viser posten i begge budsjett, men beløpene settes hver for seg.</p>
 
                     <div className="flex justify-end space-x-3 pt-2">
                         <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">Avbryt</button>

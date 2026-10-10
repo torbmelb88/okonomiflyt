@@ -107,7 +107,8 @@ connector for Claude på claude.ai/mobil — se
   [src/services/demoData.js](src/services/demoData.js)
 - [BudgetContext](src/contexts/BudgetContext.jsx) eier all tilstand for aktivt
   budsjett (kontoer, transaksjoner, budsjettposter, kvitteringer)
-- Budsjettposter er delt i *definisjoner* (gjenbrukbart bibliotek) og
-  *instanser* per budsjett med månedlige overstyringer
+- Budsjettposter er delt i *definisjoner* (gjenbrukbart bibliotek, opprettes i
+  Innstillinger) og *instanser* per budsjett; planlagt beløp settes per måned
+  (`monthlyBudgets`), det finnes ikke noe standardbeløp på posten
 - sb1-sync er eneste komponent som kjenner bankens feltnavn; alt normaliseres
   før det lander i Firestore

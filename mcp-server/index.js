@@ -225,7 +225,7 @@ function buildServer() {
 
     server.registerTool('list_budgets', {
         title: 'List budgets and budget lines',
-        description: 'List the budgets (personal/shared) with members and their planned budget lines (budsjettposter) with standard monthly amounts. Virtual lines (e.g. "my share of the shared budget") are marked isVirtual.',
+        description: 'List the budgets (personal/shared) with members and their budget lines (budsjettposter). Planned amounts are set per month — use get_month_summary for them. Virtual lines (e.g. "my share of the shared budget") are marked isVirtual.',
         inputSchema: {},
     }, async () => {
         const [budgets, expenses] = await Promise.all([
@@ -242,8 +242,6 @@ function buildServer() {
                 id: e.id,
                 name: e.name,
                 category: e.category || null,
-                monthlyAmount: e.monthlyAmount ?? e.amount ?? null,
-                frequency: e.frequency || null,
                 isVirtual: !!e.isVirtual,
             })),
         })));
@@ -280,7 +278,8 @@ function buildServer() {
 
             const lines = expenses.filter(e => e.budgetId === b.id).map(e => {
                 const override = monthlyBudgets.find(mb => mb.budgetId === b.id && mb.expenseId === e.id);
-                const budgeted = override?.amount ?? e.monthlyAmount ?? e.amount ?? 0;
+                // Planned amounts live per month only; no standard amount on the line
+                const budgeted = override?.amount ?? 0;
                 const actual = txs.filter(t => t.budgetItemId === e.id)
                     .reduce((acc, t) => acc + (t.type === 'income' ? -t.amount : t.amount), 0);
                 return {
