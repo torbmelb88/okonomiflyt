@@ -77,13 +77,18 @@ export default function Oppgjor() {
     if (loading) return <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 py-8 justify-center"><Loader2 className="w-5 h-5 animate-spin" /> Beregner oppgjør…</div>;
 
     // Render helper (not a component, so it is not recreated per render)
-    const partyCard = ({ title, share, amount, utlegg, utleggLabel }) => (
+    const partyCard = ({ title, share, amount, utlegg, utleggLabel, privat, privatLabel }) => (
         <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-800">
             <div className="text-sm text-gray-600 dark:text-gray-400">{title} ({(share * 100).toFixed(0)}%)</div>
             <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{fmt(amount)} kr</div>
             {Math.abs(utlegg) >= 0.5 && (
                 <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
                     {utlegg > 0 ? `Inkl. ${utleggLabel} −${fmt(utlegg)} kr` : `Inkl. felles innbetaling mottatt privat +${fmt(-utlegg)} kr`}
+                </div>
+            )}
+            {Math.abs(privat) >= 0.5 && (
+                <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                    Inkl. {privatLabel} +{fmt(privat)} kr
                 </div>
             )}
             {bufferPerParty > 0 && (
@@ -118,19 +123,19 @@ export default function Oppgjor() {
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">Fordeling av Fellesutgifter
-                            <InfoTip text="Det hver av dere skal overføre: egen andel av fellesutgiftene etter fordelingsnøkkelen, minus utlegg dere allerede har lagt ut — rundet opp etter innstillingen for avrunding. Bufferoppbygging kommer i tillegg og vises som egen linje. Bare kjøp som er knyttet til en budsjettpost er med. Samme tall som «Andel fellesutgifter» på Min Oversikt." />
+                            <InfoTip text="Det hver av dere skal overføre: egen andel av fellesutgiftene etter fordelingsnøkkelen, minus utlegg dere allerede har lagt ut, pluss private deler av felles kjøp («Privat del») — rundet opp etter innstillingen for avrunding. Bufferoppbygging kommer i tillegg og vises som egen linje. Bare kjøp som er knyttet til en budsjettpost er med. Samme tall som «Andel fellesutgifter» på Min Oversikt." />
                         </h3>
                         <span className="text-sm text-purple-700 dark:text-purple-300 font-medium flex items-center gap-1">{split.splitLabel} · {(split.userShare * 100).toFixed(0)}% / {(split.partnerShare * 100).toFixed(0)}%
                             <InfoTip text="Fordelingsnøkkelen fra Innstillinger for fellesbudsjettet. «Basert på inntekt» bruker inntektene som er lagt inn der; er ingen registrert, deles det 50/50." />
                         </span>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {partyCard({ title: 'Du betaler', share: split.userShare, amount: split.userAmount, utlegg: split.utleggSelf, utleggLabel: 'dine utlegg' })}
-                        {partyCard({ title: 'Partner betaler', share: split.partnerShare, amount: split.partnerAmount, utlegg: split.utleggPartner, utleggLabel: 'partners utlegg' })}
+                        {partyCard({ title: 'Du betaler', share: split.userShare, amount: split.userAmount, utlegg: split.utleggSelf, utleggLabel: 'dine utlegg', privat: split.privateSelf, privatLabel: 'dine private deler' })}
+                        {partyCard({ title: 'Partner betaler', share: split.partnerShare, amount: split.partnerAmount, utlegg: split.utleggPartner, utleggLabel: 'partners utlegg', privat: split.privatePartner, privatLabel: 'partners private deler' })}
                     </div>
                     <div className="flex justify-between items-center text-sm pt-4 mt-4 border-t border-gray-100 dark:border-gray-700">
                         <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Fordeles:
-                            <InfoTip text="Summen som fordeles mellom dere denne måneden. Uavstemte kjøp og alt som holdes utenfor oppgjør (på transaksjon, prosjekt eller konto) er ikke med. Dette er ikke det samme som forbruket på Budsjett-siden, som teller alle poster." />
+                            <InfoTip text="Summen som fordeles mellom dere denne måneden. Uavstemte kjøp, alt som holdes utenfor oppgjør (på transaksjon, prosjekt eller konto) og private deler av felles kjøp er ikke med. Dette er ikke det samme som forbruket på Budsjett-siden, som teller alle poster." />
                         </span>
                         <span className="font-medium dark:text-gray-200">{split.total.toLocaleString('no-NO', { maximumFractionDigits: 0 })} kr</span>
                     </div>

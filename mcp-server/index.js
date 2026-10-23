@@ -88,6 +88,13 @@ function coveredByAccountOf(t, projectsById) {
     const p = t.projectId ? projectsById?.get(t.projectId) : null;
     return p?.excludeFromSharedCalc ? (p.coveredByAccountId || null) : null;
 }
+// «Privat del» mirrors privatePortionOf in utils/settlement.js: the part of a
+// shared purchase that one party ('self' = budget owner | 'partner') pays alone.
+function privatePortionOf(t) {
+    const amount = parseFloat(t?.privateAmount) || 0;
+    if (amount <= 0 || !t?.privateFor) return null;
+    return { amount: Math.min(amount, parseFloat(t.amount) || amount), party: t.privateFor === 'partner' ? 'partner' : 'self' };
+}
 
 // Gjennomreise («dekkes av innbetaling», web: utils/coverage.js): an outgoing
 // transfer funded by an incoming payment. The expense carries
@@ -159,6 +166,10 @@ function txView(t, accountsById, expensesById, budgetsById, projectsById, coverB
     if (t.source) view.source = t.source;
     if (t.externalId) view.externalId = t.externalId;
     if (t.paidPrivatelyBy) view.paidPrivatelyBy = t.paidPrivatelyBy;
+    // «Privat del»: this much of a shared purchase is for one party only and
+    // is charged to them in full in the settlement instead of being split.
+    const priv = privatePortionOf(t);
+    if (priv) { view.privateAmount = priv.amount; view.privateFor = priv.party; }
     // Oppgjør flags (mirror Oppgjor.jsx): excluded rows never enter the split;
     // coveredByAccount says which account footed the bill.
     const excluded = exclusionReason(t, accountsById, projectsById);
@@ -329,7 +340,7 @@ function buildServer() {
 
     server.registerTool('list_transactions', {
         title: 'List transactions',
-        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `excludeFromSharedCalc` rows are kept out of the settlement split (`excludedBy` says whether the row itself or its project holds it out; `coveredByAccount` names the account that covered it); `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. `gjennomreise` (pass-through money: a transfer funded by an incoming payment) gives the whole linked group with status ok/missing/mismatch and the in/out sums. `month` is the month the row is COUNTED in (oppgjør, budget, summaries); it normally equals the month of the date, but a bill can deliberately be counted in the month before or after its payment date («Telles i»), so filter and sum by `month`, never by `date`. Sorted newest first.',
+        description: 'List transactions, filterable by month, budget, account, text search and reconciliation state. Amounts are NOK and always positive; `type` says whether it is income or expense. `reconcileState` is "reconciled" (confirmed against the bank), "booked" (self-reported, categorized, awaiting its bank copy) or "unreconciled" (not categorized). `paidPrivatelyBy` marks utlegg (paid privately on behalf of the shared budget). `privateAmount`/`privateFor` («Privat del») mark the part of a shared purchase that is for one party only ("self" = the budget owner, "partner"): it leaves the split and is charged to that party in full in the settlement, while the row still counts in full against its budget line. `excludeFromSharedCalc` rows are kept out of the settlement split (`excludedBy` says whether the row itself or its project holds it out; `coveredByAccount` names the account that covered it); `awaitingRefund` marks a purchase someone will pay back (expectedRefundAmount, null = all of it); refunds arrive as income rows with `isRefund`. Transactions with a `currency` field are foreign purchases still awaiting the bank\'s NOK amount. `gjennomreise` (pass-through money: a transfer funded by an incoming payment) gives the whole linked group with status ok/missing/mismatch and the in/out sums. `month` is the month the row is COUNTED in (oppgjør, budget, summaries); it normally equals the month of the date, but a bill can deliberately be counted in the month before or after its payment date («Telles i»), so filter and sum by `month`, never by `date`. Sorted newest first.',
         inputSchema: {
             month: z.string().optional().describe('YYYY-MM. Strongly recommended to limit the result.'),
             budgetId: z.string().optional(),
@@ -617,6 +628,8 @@ function bufferContributionPerParty(plan, month, parties) {
 // Oppgjør and Min Oversikt show — per-person settlement for one month: shared
 // rows on a budget line, not held out (row/project/account) and not
 // gjennomreise, split by the budget's method, minus each party's utlegg,
+// plus each party's private parts of shared purchases («Privat del», which
+// leave the split and also settle when only the ACCOUNT is held out),
 // rounded up. The buffer plan's per-party extra is added on top (the app shows
 // it as a separate line under the same amount). "owner" is the budget's owner
 // member (the app's "Du"); with 5050/custom splits the uid never matters. The
@@ -633,12 +646,16 @@ function computeOppgjor({ shared, accounts, projects = [], txs, month, covering 
 
     const accountsById = new Map(accounts.map(a => [a.id, a]));
     const projectsById = new Map(projects.map(p => [p.id, p]));
-    const splitTx = txs.filter(t =>
-        t.budgetItemId && !exclusionReason(t, accountsById, projectsById) && !isCoverNeutral(t, covering));
-    const sum = (arr) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * (parseFloat(t.amount) || 0), 0);
-    const totalSharedActual = sum(splitTx);
+    const monthTx = txs.filter(t => !isCoverNeutral(t, covering));
+    const splitTx = monthTx.filter(t => t.budgetItemId && !exclusionReason(t, accountsById, projectsById));
+    const sum = (arr, of = (t) => parseFloat(t.amount) || 0) => arr.reduce((s, t) => s + (t.type === 'income' ? -1 : 1) * of(t), 0);
+    const totalSharedActual = sum(splitTx, (t) => (parseFloat(t.amount) || 0) - (privatePortionOf(t)?.amount || 0));
     const utleggSelf = sum(splitTx.filter(t => t.paidPrivatelyBy === 'self'));
     const utleggPartner = sum(splitTx.filter(t => t.paidPrivatelyBy === 'partner'));
+    const privateTx = monthTx.filter(t => t.budgetItemId && privatePortionOf(t) && !['transaction', 'project'].includes(exclusionReason(t, accountsById, projectsById)));
+    const privateOf = (party) => sum(privateTx.filter(t => privatePortionOf(t).party === party), (t) => privatePortionOf(t).amount);
+    const privateSelf = privateOf('self');
+    const privatePartner = privateOf('partner');
 
     let userShare = 0.5;
     const method = shared.splitMethod || 'income';
@@ -655,8 +672,8 @@ function computeOppgjor({ shared, accounts, projects = [], txs, month, covering 
         (s, a) => s + bufferContributionPerParty(a.bufferPlan, month, parties), 0
     );
 
-    const rawUser = totalSharedActual * userShare - utleggSelf;
-    const rawPartner = totalSharedActual * (1 - userShare) - utleggPartner;
+    const rawUser = totalSharedActual * userShare - utleggSelf + privateSelf;
+    const rawPartner = totalSharedActual * (1 - userShare) - utleggPartner + privatePartner;
     const roundAmount = (raw) => ROUNDING_MODE > 1
         ? Math.ceil(raw / ROUNDING_MODE) * ROUNDING_MODE
         : Math.round(raw);
@@ -669,6 +686,8 @@ function computeOppgjor({ shared, accounts, projects = [], txs, month, covering 
         bufferPerParty,
         utleggOwner: Math.round(utleggSelf * 100) / 100,
         utleggPartner: Math.round(utleggPartner * 100) / 100,
+        privateOwner: Math.round(privateSelf * 100) / 100,
+        privatePartner: Math.round(privatePartner * 100) / 100,
         totalSharedConsumption: Math.round(totalSharedActual * 100) / 100,
     };
 }

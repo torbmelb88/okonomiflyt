@@ -12,6 +12,7 @@ import RefundAllocationEditor from './RefundAllocationEditor';
 import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
 import { KIND, KIND_CATEGORY, KIND_EMOJI, KIND_HELP, kindsForType, kindLabelFor, kindHelpFor, transactionKind, isKindCategory, isSalary } from '../../utils/kinds';
 import { isCountedInOtherMonth, dateMonth, addMonths, formatMonthLong, formatMonthShort } from '../../utils/countedMonth';
+import { PRIVATE_PARTY_LABEL } from '../../utils/settlement';
 import clsx from 'clsx';
 import { useDialog } from '../../contexts/DialogContext';
 
@@ -91,6 +92,10 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const [excludeFromSharedCalc, setExcludeFromSharedCalc] = useState(false);
     const [coveredByAccountId, setCoveredByAccountId] = useState('');
     const [asUtlegg, setAsUtlegg] = useState(false);
+    // «Privat del»: part of a shared purchase that only one of you pays for
+    const [hasPrivate, setHasPrivate] = useState(false);
+    const [privateAmount, setPrivateAmount] = useState('');
+    const [privateFor, setPrivateFor] = useState('partner');
     const [awaitingRefund, setAwaitingRefund] = useState(false);
     const [expectedRefundAmount, setExpectedRefundAmount] = useState('');
     const [coveredByIncoming, setCoveredByIncoming] = useState(false);
@@ -155,6 +160,9 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         // Utlegg is kept as stored: the companion app sets it when logging,
         // and an already reconciled row must not lose it on edit.
         setAsUtlegg(t?.paidPrivatelyBy === 'self');
+        setHasPrivate(!!(t?.privateAmount > 0 && t?.privateFor));
+        setPrivateAmount(t?.privateAmount > 0 ? String(t.privateAmount) : '');
+        setPrivateFor(t?.privateFor === 'self' ? 'self' : 'partner');
         setAwaitingRefund(!!t?.awaitingRefund);
         setExpectedRefundAmount(t?.expectedRefundAmount != null ? String(t.expectedRefundAmount) : '');
         setCoveredByIncoming(!!(live && isCoveredExpense(live)));
@@ -164,7 +172,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setCountedMonth(isCountedInOtherMonth(t) ? t.month : '');
         setCurrency(t?.currency && t.currency !== 'NOK' ? t.currency : '');
         // «Flere valg» opens by itself when something in it is already set
-        setShowMore(!!(t?.isUnnecessary || t?.excludeFromSharedCalc || t?.paidPrivatelyBy || t?.awaitingRefund || t?.comment || (live && isCoveredExpense(live)) || (t?.currency && t.currency !== 'NOK') || isCountedInOtherMonth(t)));
+        setShowMore(!!(t?.isUnnecessary || t?.excludeFromSharedCalc || t?.paidPrivatelyBy || t?.privateAmount > 0 || t?.awaitingRefund || t?.comment || (live && isCoveredExpense(live)) || (t?.currency && t.currency !== 'NOK') || isCountedInOtherMonth(t)));
         // Budget: the account's default, or the stored one for a reconciled row
         const txAccount = accounts.find(a => a.id === t?.accountId);
         const accountDefault = txAccount?.defaultBudgetId || txAccount?.budgetId;
@@ -200,6 +208,13 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const projectHoldsOut = !!selectedProject?.excludeFromSharedCalc;
     const projectCoverAccount = projectHoldsOut && selectedProject.coveredByAccountId
         ? accounts.find(a => a.id === selectedProject.coveredByAccountId) : null;
+    // Privat del = a shared purchase where part of it is for one of you only.
+    // Meaningless when the row settles nothing (held out by itself or its project).
+    const showPrivate = kind === KIND.purchase && isExpense && isSharedTarget && !excludeFromSharedCalc && !projectHoldsOut;
+    const privateOn = showPrivate && hasPrivate;
+    const privateAmt = privateOn ? parseAmount(privateAmount) : 0;
+    const privateTooBig = privateOn && privateAmt > (parseFloat(currentTransaction.amount) || 0) + 0.005;
+    const privateOk = !privateOn || (privateAmt > 0 && !privateTooBig);
 
     // --- telles i (utils/countedMonth.js) ---
     // Only a purchase can be counted in another month; every other kind
@@ -323,7 +338,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
 
     // --- what «Lagre» will do ---
     const reconcilesNow = reconcilesOnLink({ ...currentTransaction, currency: currency || null });
-    const canSave = !saving && !!tempDate && !!kind && (
+    const canSave = !saving && !!tempDate && !!kind && privateOk && (
         kind === KIND.purchase ? !!(selectedBudgetItemId && selectedBudgetId) :
         kind === KIND.refund ? (existingRefundLink || allocationsOk || refundUnlinked) :
         kind === KIND.passthrough ? coverExpensesAfter.length > 0 :
@@ -350,6 +365,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         if (kind === KIND.purchase) {
             if (excludeFromSharedCalc || projectHoldsOut) parts.push(`utenfor oppgjør${(excludeFromSharedCalc ? coveredByAccountId : projectCoverAccount?.id) ? `, betales fra ${accountName(excludeFromSharedCalc ? coveredByAccountId : projectCoverAccount.id)}` : ''}`);
             if (showUtlegg && asUtlegg) parts.push(isIncome ? 'mottatt privat, legges til overføringen' : 'utlegg');
+            if (privateOn) parts.push(privateAmt > 0 ? `privat del ${fmtKr(privateAmt)} kr betales av ${PRIVATE_PARTY_LABEL[privateFor]}` : 'privat del → skriv inn beløpet');
             if (isUnnecessary) parts.push('unødvendig');
             if (countedMonthMoved) parts.push(`telles i ${formatMonthLong(effectiveMonth)}`);
             if (isExpense && awaitingRefund && !markRefundComplete) parts.push(`venter refusjon${expectedRefundAmount ? ` ${fmtKr(parseAmount(expectedRefundAmount))} kr` : ''}`);
@@ -402,6 +418,8 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                     projectId: purchase ? (selectedProjectId || null) : null,
                     projectSubcategory: purchase && selectedProjectId ? (selectedProjectSubcategory || null) : null,
                     paidPrivatelyBy: purchase && showUtlegg && asUtlegg ? 'self' : null,
+                    privateAmount: purchase && privateOn && privateAmt > 0 ? privateAmt : null,
+                    privateFor: purchase && privateOn && privateAmt > 0 ? privateFor : null,
                     awaitingRefund: purchase && isExpense && awaitingRefund && !markRefundComplete,
                     expectedRefundAmount: purchase && isExpense && awaitingRefund && !markRefundComplete && expectedRefundAmount !== ''
                         ? (parseAmount(expectedRefundAmount) || null) : null,
@@ -542,6 +560,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const activeAdjustments = [
         kind === KIND.purchase && (excludeFromSharedCalc || projectHoldsOut) && 'Utenfor oppgjør',
         kind === KIND.purchase && showUtlegg && asUtlegg && (isIncome ? 'Mottatt privat' : 'Utlegg'),
+        privateOn && 'Privat del',
         kind === KIND.purchase && isUnnecessary && 'Unødvendig',
         kind === KIND.purchase && countedMonthMoved && `Telles i ${formatMonthShort(effectiveMonth)}`,
         kind === KIND.purchase && isExpense && awaitingRefund && !markRefundComplete && 'Venter refusjon',
@@ -833,6 +852,35 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                             : 'En felles utgift betalt fra privat konto. Beløpet trekkes fra det du skal overføre til felleskontoen.'} />
                                                     </span>
                                                 </label>
+                                            )}
+                                            {showPrivate && (
+                                                <div className="space-y-1">
+                                                    <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                                        <input type="checkbox" checked={hasPrivate} onChange={(e) => setHasPrivate(e.target.checked)} className="w-4 h-4 mt-0.5 rounded" />
+                                                        <span>Privat del 👤
+                                                            <InfoTip text="Felles kjøp der noe av beløpet bare gjelder én av dere (f.eks. et speil til den ene i samme handel som bordet). Den delen holdes utenfor fordelingen og legges i sin helhet på den som skal betale, i oppgjøret. Hele beløpet telles fortsatt mot budsjettposten. Kan være hele beløpet." />
+                                                            {hasPrivate && (
+                                                                <span className="block mt-1 flex items-center gap-2 flex-wrap">
+                                                                    <input type="number" inputMode="decimal" min="0" step="0.01" value={privateAmount} onChange={(e) => setPrivateAmount(e.target.value)} placeholder="beløp" className={clsx(inputCls, "w-32")} autoFocus />
+                                                                    <span className="text-xs text-gray-500 dark:text-gray-400">kr betales av</span>
+                                                                    <select value={privateFor} onChange={(e) => setPrivateFor(e.target.value)} className={inputCls}>
+                                                                        <option value="partner">partner</option>
+                                                                        <option value="self">meg</option>
+                                                                    </select>
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                    </label>
+                                                    {privateTooBig && (
+                                                        <p className="ml-6 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-1.5">
+                                                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                                                            <span>Den private delen kan ikke være større enn kjøpet ({fmtKr(currentTransaction.amount)} kr).</span>
+                                                        </p>
+                                                    )}
+                                                    {privateOn && privateAmt > 0 && !privateTooBig && (
+                                                        <p className="ml-6 text-xs text-gray-500 dark:text-gray-400">Deles: {fmtKr((parseFloat(currentTransaction.amount) || 0) - privateAmt)} kr · {PRIVATE_PARTY_LABEL[privateFor]} betaler {fmtKr(privateAmt)} kr i tillegg.</p>
+                                                    )}
+                                                </div>
                                             )}
                                             <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
                                                 <input type="checkbox" checked={isUnnecessary} onChange={(e) => setIsUnnecessary(e.target.checked)} className="w-4 h-4 mt-0.5 rounded" />

@@ -8,7 +8,7 @@ import {
 import clsx from 'clsx';
 import { useBudget } from '../../contexts/BudgetContext';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
-import { exclusionReason, EXCLUSION_LABEL } from '../../utils/settlement';
+import { exclusionReason, EXCLUSION_LABEL, privatePortionOf, sharedAmountOf, PRIVATE_PARTY_LABEL } from '../../utils/settlement';
 import { isCountedInOtherMonth, countedInLabel, countedInTitle } from '../../utils/countedMonth';
 import MergeTransactionsModal from './MergeTransactionsModal';
 import ConfirmationModal from '../common/ConfirmationModal';
@@ -111,6 +111,7 @@ export default function TransactionsPanel({
         { label: 'Spesielt', filters: [
             { key: 'cover', label: 'Gjennomreise', Icon: ArrowLeftRight, test: (t) => coverGroupById.has(t.id), hint: 'Penger på gjennomreise: overføringer som dekkes av en innbetaling, og innbetalingene som dekker dem' },
             { key: 'utlegg', label: 'Utlegg', Icon: null, test: (t) => !!t.paidPrivatelyBy, hint: 'Felles utgifter betalt fra egen konto — trekkes fra det du skal overføre' },
+            { key: 'private', label: 'Privat del', Icon: null, test: (t) => !!privatePortionOf(t), hint: 'Felles kjøp der en del av beløpet bare gjelder én av dere — den delen legges på vedkommende i oppgjøret' },
             { key: 'comment', label: 'Kommentar', Icon: MessageSquare, test: (t) => !!t.comment },
             { key: 'receipt', label: 'Kvittering', Icon: ReceiptText, test: (t) => !!t.receiptId || receipts.some(r => r.transactionId === t.id) },
         ] },
@@ -275,6 +276,9 @@ export default function TransactionsPanel({
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider" title={trans.type === 'income'
                                     ? 'Felles innbetaling mottatt på egen konto — beløpet legges til det du skal overføre til felleskontoen'
                                     : 'Felles utgift betalt fra egen konto — beløpet trekkes fra det du skal overføre til felleskontoen'}>{trans.type === 'income' ? 'Mottatt privat' : 'Utlegg'}</span>
+                            )}
+                            {privatePortionOf(trans) && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] font-bold uppercase tracking-wider" title={`Felles kjøp der ${privatePortionOf(trans).amount.toLocaleString('no-NO')} kr bare gjelder ${PRIVATE_PARTY_LABEL[privatePortionOf(trans).party]}. Den delen holdes utenfor fordelingen og legges på vedkommende i oppgjøret; ${sharedAmountOf(trans).toLocaleString('no-NO')} kr deles.`}>Privat del {privatePortionOf(trans).amount.toLocaleString('no-NO')} kr · {PRIVATE_PARTY_LABEL[privatePortionOf(trans).party]}</span>
                             )}
                             {trans.refundSplit && (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider" title="Innbetalingen er fordelt på flere kjøp — beløpet telles via de fordelte radene, ikke denne">

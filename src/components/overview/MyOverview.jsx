@@ -332,7 +332,7 @@ export default function MyOverview() {
                             <div className="space-y-3 mb-6">
                                 <div className="flex justify-between text-sm">
                                     <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Andel fellesutgifter ({formatMonth(prevMonthStr)})
-                                        <InfoTip text="Din andel av forrige måneds fellesutgifter etter fordelingsnøkkelen, minus utlegg du har lagt ut. Samme tall som «Du betaler» på Oppgjør. Uavstemte kjøp teller ikke — de må knyttes til en budsjettpost først." />
+                                        <InfoTip text="Din andel av forrige måneds fellesutgifter etter fordelingsnøkkelen, minus utlegg du har lagt ut, pluss private deler av felles kjøp som er dine. Samme tall som «Du betaler» på Oppgjør. Uavstemte kjøp teller ikke — de må knyttes til en budsjettpost først." />
                                     </span>
                                     <span className="font-medium text-gray-900 dark:text-white">
                                         {sharedShareAmount.toLocaleString('no-NO')} kr

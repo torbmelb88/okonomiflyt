@@ -211,6 +211,8 @@ export function createDemoDb() {
         tx(-1, 19, { budgetId: 'budget-shared', accountId: 'acc-felles', name: 'REMA 1000 SENTRUM', amount: 980.75, type: 'expense', budgetItemId: 'exp-mat' }),
         // Paid privately (utlegg) — deducted from the transfer in Oppgjør
         tx(-1, 24, { budgetId: 'budget-shared', accountId: 'acc-bruks', name: 'REMA 1000 SENTRUM', amount: 350.40, type: 'expense', budgetItemId: 'exp-mat', paidPrivatelyBy: 'self' }),
+        // Felles kjøp med en privat del: speilet er partners, bordet deles
+        tx(-1, 25, { budgetId: 'budget-shared', accountId: 'acc-bruks', name: 'JYSK', amount: 2449, type: 'expense', budgetItemId: 'exp-mat', privateAmount: 499, privateFor: 'partner', comment: 'Bord (felles) + speil til partner' }),
 
         // Groceries bought on the personal credit card, routed to the shared
         // budget as utlegg (card bill is paid personally)
