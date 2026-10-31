@@ -43,9 +43,14 @@ class NotificationService : NotificationListenerService() {
 
     private val processedNotifications = java.util.Collections.synchronizedMap(object : java.util.LinkedHashMap<String, Long>(20, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean {
-            return size > 20
+            return size > 50
         }
     })
+
+    // Wallet reposter gamle varsler (oppdateringer, gruppering) i flere minutter
+    // etterpå, så 5 sekunder var for kort. Et reelt gjenkjøp med samme tekst
+    // innen vinduet er sjeldent nok til at det er verdt å akseptere.
+    private val dedupWindowMs = 10 * 60 * 1000L
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName
@@ -60,13 +65,17 @@ class NotificationService : NotificationListenerService() {
 
         if (isWallet && hasMoney) {
             val currentTime = System.currentTimeMillis()
-            // Key for deduplication: Title + Text + (approx time 5 sec window?)
-            // Google Wallet updates the same notification often. 
-            // We'll use title + text as uniqueness. If we saw this exact content recently (5s), skip.
+            // Gruppe-oppsummeringer gjentar innholdet fra enkeltvarslene.
+            if (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) {
+                Log.d(TAG, "Skipping group summary notification")
+                return
+            }
+            // Key for deduplication: Title + Text. Google Wallet updates and
+            // reposts the same notification often; skip if seen within the window.
             val contentKey = "$title|$text"
             val lastSeen = processedNotifications[contentKey]
-            
-            if (lastSeen != null && (currentTime - lastSeen < 5000)) {
+
+            if (lastSeen != null && (currentTime - lastSeen < dedupWindowMs)) {
                 Log.d(TAG, "DUPLICATE: Skipping recently processed notification: $contentKey")
                 return
             }
