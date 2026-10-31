@@ -11,6 +11,7 @@ import { refundStatus, refundsOf, allocationsValid, allocationComplete, parseAmo
 import RefundAllocationEditor from './RefundAllocationEditor';
 import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
 import { KIND, KIND_CATEGORY, KIND_EMOJI, KIND_HELP, kindsForType, kindLabelFor, kindHelpFor, transactionKind, isKindCategory, isSalary } from '../../utils/kinds';
+import { findTransferPartner, transferPairHistory, partnerKind, outgoingFirst, PAIR_DAYS } from '../../utils/transferPairs';
 import { isCountedInOtherMonth, dateMonth, addMonths, formatMonthLong, formatMonthShort } from '../../utils/countedMonth';
 import { PRIVATE_PARTY_LABEL } from '../../utils/settlement';
 import clsx from 'clsx';
@@ -45,7 +46,7 @@ const listCls = "max-h-56 overflow-y-auto divide-y divide-gray-100 dark:divide-g
  *
  * `mode`: 'queue' walks a batch (import, «Avstem»), 'edit' opens one row.
  */
-export default function ReconcileTransactionsModal({ isOpen, onClose, transactions, onComplete, mode = 'queue' }) {
+export default function ReconcileTransactionsModal({ isOpen, onClose, transactions: incomingBatch, onComplete, mode = 'queue' }) {
     const { notify, confirm } = useDialog();
     const {
         allExpenses: expenses, budgetItemDefs, categories, ensureInstanceForDef,
@@ -55,6 +56,14 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     } = useBudget();
 
     // --- queue ---
+    // Ordered once per batch (not on every live update, which would reset the
+    // queue): outgoing rows of a transfer pair come before their mirror.
+    const [batchSource, setBatchSource] = useState(incomingBatch);
+    const [transactions, setTransactions] = useState(() => outgoingFirst(incomingBatch, allTransactions));
+    if (incomingBatch !== batchSource) {
+        setBatchSource(incomingBatch);
+        setTransactions(outgoingFirst(incomingBatch, allTransactions));
+    }
     const [currentIndex, setCurrentIndex] = useState(0);
     const [handledIds, setHandledIds] = useState(() => new Set());
     const [processedCount, setProcessedCount] = useState(0);
@@ -63,6 +72,8 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
 
     // --- 1. hva er dette ---
     const [kind, setKind] = useState(null);
+    // overføringspar: save the mirror row (utils/transferPairs.js) together with this one
+    const [pairOn, setPairOn] = useState(true);
     const [showGuide, setShowGuide] = useState(false);
 
     // --- 2. detaljer ---
@@ -136,11 +147,20 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         const live = t ? (allTransactions.find(x => x.id === t.id) || t) : null;
         const suggestedDef = t ? resolveDefId(suggestions[t.id]?.budgetItemId) : '';
         const storedKind = live ? transactionKind(live, allTransactions) : null;
+        // A row that is one half of a money movement between own accounts: the
+        // outgoing row defaults to what the same pair was last time (nothing
+        // when it is new — guessing wrong would count it in the settlement),
+        // the incoming mirror follows an already reconciled outgoing row.
+        const pairPartner = live && mode !== 'edit' && !isHandled(live) ? findTransferPartner(live, allTransactions) : null;
+        const pairHistory = pairPartner && live.type === 'expense' ? transferPairHistory(live, pairPartner, allTransactions) : null;
+        const mirrorKind = pairPartner && live.type === 'income' && isHandled(pairPartner)
+            ? partnerKind(transactionKind(pairPartner, allTransactions)) : null;
         // Unreconciled expense: «kjøp» is the common case, so it is preselected
         // (with the suggestion when there is one). Income has no safe default.
-        setKind(storedKind || (t?.type === 'expense' ? KIND.purchase : null));
+        setKind(storedKind || mirrorKind || (pairPartner ? (pairHistory?.kind || null) : (t?.type === 'expense' ? KIND.purchase : null)));
+        setPairOn(true);
         setShowGuide(false);
-        setSelectedBudgetItemId(t ? (resolveDefId(t.budgetItemId) || suggestedDef || '') : '');
+        setSelectedBudgetItemId(t ? (resolveDefId(t.budgetItemId) || resolveDefId(pairHistory?.row.budgetItemId) || suggestedDef || '') : '');
         setSelectedProjectId(t?.projectId || '');
         setSelectedProjectSubcategory(t?.projectSubcategory || '');
         setAllocations([]);
@@ -193,6 +213,17 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     // Live copy of the row (the prop array is a snapshot)
     const liveTx = allTransactions.find(t => t.id === currentTransaction.id) || currentTransaction;
     const storedKind = transactionKind(liveTx, allTransactions);
+
+    // --- overføringspar (utils/transferPairs.js) ---
+    const pair = !isEdit && !isHandled(liveTx) ? findTransferPartner(liveTx, allTransactions) : null;
+    const pairDone = !!pair && isHandled(pair);
+    const pairIndex = pair ? transactions.findIndex(t => t.id === pair.id && !handledIds.has(t.id)) : -1;
+    const pairHistory = pair && isExpense ? transferPairHistory(liveTx, pair, allTransactions) : null;
+    const pairHistoryDefId = resolveDefId(pairHistory?.row.budgetItemId);
+    const pairHistoryDef = budgetItemDefs.find(d => d.id === pairHistoryDefId) || null;
+    // The mirror is saved with this row only when this is the outgoing side and it is still open
+    const savesMirror = isExpense && !!pair && !pairDone && pairOn && !!kind;
+    const pairDateBroken = !!pair && !!tempDate && Math.abs((new Date(tempDate) - new Date(pair.date)) / 86400000) > PAIR_DAYS;
 
     // --- budget / budget items ---
     const selectedBudget = budgets.find(b => b.id === selectedBudgetId);
@@ -373,6 +404,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
             if (isExpense && selectedIncomingId && allocationsOk) parts.push(`kobler ${allocIncome.name}`);
         }
         if (isExpense && coveredByIncoming) parts.push(`gjennomreise${coverIncomeIdsAfter.length === 0 ? ' (innbetaling mangler)' : coverAdd.length ? ` (+${coverAdd.length} innbetaling)` : ''}`);
+        if (savesMirror) parts.push(`motposten på ${accountName(pair.accountId)} settes til ${kindLabelFor(partnerKind(kind), 'income').toLowerCase()}`);
         if (tempDate && tempDate !== currentTransaction.date) parts.push(`dato ${tempDate}`);
         if (currency) parts.push(`beløp i ${currency}`);
         if (comment.trim()) parts.push('kommentar');
@@ -384,7 +416,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         const handled = new Set(handledIds);
         idsJustHandled.forEach(id => handled.add(id));
         setHandledIds(handled);
-        setProcessedCount(prev => prev + idsJustHandled.length);
+        setProcessedCount(prev => prev + idsJustHandled.filter(id => transactions.some(t => t.id === id)).length);
         const nextIdx = transactions.findIndex(t => !handled.has(t.id));
         if (nextIdx === -1) onComplete();
         else setCurrentIndex(nextIdx);
@@ -489,7 +521,20 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                     else await linkRefundSplit(allocIncome.id, allocs);
                 }
             }
-            advance([tx.id]);
+            // The incoming mirror of a money movement is saved with its outgoing
+            // row: always a transfer (or card bill), never on a budget item, so
+            // nothing is counted twice. Its own date and budget stay as they are.
+            const handledNow = [tx.id];
+            if (isExpense && pair && !pairDone && pairOn) {
+                await updateTransaction(pair.id, {
+                    category: KIND_CATEGORY[partnerKind(k)],
+                    month: pair.date.slice(0, 7),
+                    reconciled: true, budgetItemId: null,
+                    isRefund: false, refundOfTransactionId: null,
+                });
+                handledNow.push(pair.id);
+            }
+            advance(handledNow);
         } catch (error) {
             console.error('Failed to save transaction', error);
             notify({ message: error?.message || 'Kunne ikke lagre.', variant: 'error' });
@@ -569,7 +614,10 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         comment.trim() && 'Kommentar',
         currency && currency,
     ].filter(Boolean);
-    const showSuggestionCard = !!currentSuggestion && !storedKind && !!suggestedDefId;
+    const showSuggestionCard = !!currentSuggestion && !storedKind && !!suggestedDefId && !pair;
+    const pairHistoryLabel = !pairHistory ? null
+        : pairHistory.kind === KIND.purchase ? (pairHistoryDef ? `${catName(pairHistoryDef.categoryId)} › ${pairHistoryDef.name}` : null)
+        : kindLabelFor(pairHistory.kind, 'expense');
     const suggestionInst = currentSuggestion ? expenses.find(e => e.id === currentSuggestion.budgetItemId) : null;
     const suggestionDef = budgetItemDefs.find(d => d.id === suggestedDefId) || null;
 
@@ -639,6 +687,46 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                             </ul>
                         )}
 
+                        {pair && (
+                            <div className="rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/20 p-3 space-y-2 text-sm">
+                                <p className="font-medium text-sky-800 dark:text-sky-200 flex items-center gap-1.5 flex-wrap">
+                                    <ArrowLeftRight className="w-4 h-4 flex-shrink-0" />
+                                    {isExpense ? 'Overføring' : 'Innsiden av en overføring'}: {accountName(isExpense ? liveTx.accountId : pair.accountId)} → {accountName(isExpense ? pair.accountId : liveTx.accountId)}
+                                </p>
+                                <p className="text-xs text-sky-700 dark:text-sky-300">
+                                    {isExpense ? 'Motposten' : 'Utgående rad'}: «{pair.name}» {isExpense ? '+' : '−'}{fmtKr(pair.amount)} kr, {pair.date}{pair.date !== liveTx.date ? ` (${Math.round(daysBetween(pair.date, liveTx.date))} d fra denne)` : ''}
+                                    {pairDone && ` · allerede avstemt som ${kindLabelFor(transactionKind(pair, allTransactions), pair.type).toLowerCase()}`}
+                                </p>
+                                {isExpense && !pairDone && (
+                                    <>
+                                        {pairHistory && pairHistoryLabel && (
+                                            <div className="flex items-center justify-between gap-3">
+                                                <p className="text-xs text-sky-700 dark:text-sky-300 min-w-0">Sist ({pairHistory.row.date}) ble denne overføringen avstemt som <span className="font-medium">{pairHistoryLabel}</span>.</p>
+                                                <button onClick={() => save({ kind: pairHistory.kind, ...(pairHistory.kind === KIND.purchase ? { defId: pairHistoryDefId } : {}) })} disabled={saving} className="px-3 py-2 bg-sky-600 hover:bg-sky-700 disabled:bg-gray-300 text-white text-sm font-medium rounded-lg whitespace-nowrap flex items-center gap-1.5">
+                                                    <Check className="w-4 h-4" />Som sist{!isEdit && ' og neste'}
+                                                </button>
+                                            </div>
+                                        )}
+                                        {!pairHistory && <p className="text-xs text-sky-700 dark:text-sky-300">Ingen tidligere overføring mellom disse kontoene. Velg selv hva utgående rad er.</p>}
+                                        <label className="flex items-start gap-2 text-xs text-sky-800 dark:text-sky-200">
+                                            <input type="checkbox" checked={pairOn} onChange={(e) => setPairOn(e.target.checked)} className="w-3.5 h-3.5 mt-0.5 rounded" />
+                                            <span>Avstem motposten samtidig (settes til {kindLabelFor(partnerKind(kind), 'income').toLowerCase()}, ikke på noen budsjettpost)</span>
+                                        </label>
+                                    </>
+                                )}
+                                {isExpense && pairDone && <p className="text-xs text-sky-700 dark:text-sky-300">Motposten er allerede avstemt og røres ikke.</p>}
+                                {isIncome && !pairDone && (
+                                    pairIndex >= 0 ? (
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-xs text-sky-700 dark:text-sky-300 min-w-0">Utgående rad avgjør hva overføringen er. Når den er avstemt, følger denne med.</p>
+                                            <button onClick={() => setCurrentIndex(pairIndex)} className="px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg whitespace-nowrap">Gå til utgående rad</button>
+                                        </div>
+                                    ) : <p className="text-xs text-sky-700 dark:text-sky-300">Utgående rad er ikke i denne køen. Avstem den fra Transaksjoner, så følger denne med, eller velg selv under.</p>
+                                )}
+                                {isIncome && pairDone && <p className="text-xs text-sky-700 dark:text-sky-300">Denne settes som {kindLabelFor(kind || partnerKind(transactionKind(pair, allTransactions)), 'income').toLowerCase()}. Trykk Lagre.</p>}
+                                {pairDateBroken && <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />Datoen er mer enn {PAIR_DAYS} dager fra motposten. Da kjenner ikke Sparing-siden dem igjen som et par.</p>}
+                            </div>
+                        )}
                         {showSuggestionCard && (
                             <div className="rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 p-3 flex items-center justify-between gap-3">
                                 <div className="min-w-0 text-sm">

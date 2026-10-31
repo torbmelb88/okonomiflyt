@@ -5,11 +5,7 @@ import { api } from '../../services/firebase';
 import { fxPlausible } from '../../utils/currency';
 import { isSelfReported } from '../../utils/reconciliation';
 import { monthAfterRedate } from '../../utils/countedMonth';
-
-const datesClose = (d1, d2, tol = 4) => {
-    const diff = Math.abs(new Date(d2) - new Date(d1));
-    return Math.ceil(diff / 86400000) <= tol;
-};
+import { datesClose } from '../../utils/transferPairs';
 
 // Unbooked bill payments have no counterparty yet — SB1 names them by type
 // only. These labels mark a transaction as a placeholder awaiting booking.

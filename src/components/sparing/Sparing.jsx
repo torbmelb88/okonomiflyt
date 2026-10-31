@@ -3,8 +3,7 @@ import { PiggyBank, TrendingUp } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
 import InfoTip from '../common/InfoTip';
 import BudgetToggle from '../common/BudgetToggle';
-
-const datesClose = (d1, d2, tol = 4) => Math.ceil(Math.abs(new Date(d2) - new Date(d1)) / 86400000) <= tol;
+import { datesClose } from '../../utils/transferPairs';
 
 const formatMonth = (m) => {
     const [y, mo] = m.split('-');
