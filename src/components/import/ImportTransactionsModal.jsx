@@ -4,7 +4,7 @@ import { useBudget } from '../../contexts/BudgetContext';
 import { api } from '../../services/firebase';
 import { fxPlausible } from '../../utils/currency';
 import { isSelfReported } from '../../utils/reconciliation';
-import { monthAfterRedate } from '../../utils/countedMonth';
+import { monthAfterRedate, formatMonthLong, addMonths, dateMonth } from '../../utils/countedMonth';
 import { datesClose } from '../../utils/transferPairs';
 
 // Unbooked bill payments have no counterparty yet — SB1 names them by type
@@ -29,9 +29,20 @@ const isUnbooked = (s) =>
     isRecentId(s.externalId) ||
     (s.bookingStatus ? s.bookingStatus !== 'BOOKED' : looksLikePlaceholder(s.name));
 
-const firstOfThisMonth = () => {
-    const n = new Date();
-    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
+const thisMonth = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`; };
+
+// Default «hent fra»: the 1st of the current month, unless the previous month
+// still isn't marked reconciled — the bank books the last days of a month a
+// few days into the next, so until the month is closed we keep pulling from
+// its 1st. Walks back at most MAX_LOOKBACK months so a never-closed history
+// doesn't drag the default into the past.
+const MAX_LOOKBACK = 3;
+const defaultFromDate = (isMonthReconciled) => {
+    let month = thisMonth();
+    for (let back = 0; back < MAX_LOOKBACK && !isMonthReconciled(addMonths(month, -1)); back++) {
+        month = addMonths(month, -1);
+    }
+    return `${month}-01`;
 };
 
 /**
@@ -41,9 +52,9 @@ const firstOfThisMonth = () => {
  * companion app's). A "from date" limits how far back to pull. Preview, confirm.
  */
 export default function ImportTransactionsModal({ isOpen, onClose, onImported }) {
-    const { reloadTransactions } = useBudget();
+    const { reloadTransactions, isMonthReconciled } = useBudget();
     const [raw, setRaw] = useState(null); // { staged, accByKey, existing }
-    const [fromDate, setFromDate] = useState(firstOfThisMonth);
+    const [fromDate, setFromDate] = useState(() => defaultFromDate(isMonthReconciled));
     const [running, setRunning] = useState(false);
     const [done, setDone] = useState(null);
     const [error, setError] = useState('');
@@ -69,6 +80,14 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
         };
         load();
         return () => { cancelled = true; };
+    }, [isOpen]);
+
+    // Re-evaluate the default on every open: a month may have been closed
+    // since the modal was first mounted. Only on open — isMonthReconciled is
+    // a fresh closure each render and must not retrigger this.
+    useEffect(() => {
+        if (isOpen) setFromDate(defaultFromDate(isMonthReconciled));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
 
     const plan = useMemo(() => {
@@ -338,7 +357,12 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1.5"><Calendar className="w-4 h-4" /> Hent fra og med dato</label>
                                 <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
                                     className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none dark:bg-gray-700 dark:text-white" />
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Bare transaksjoner fra og med denne datoen hentes inn.</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    Bare transaksjoner fra og med denne datoen hentes inn.
+                                    {dateMonth(fromDate) < thisMonth() && !isMonthReconciled(dateMonth(fromDate)) && (
+                                        <> Står på {formatMonthLong(dateMonth(fromDate))} fordi måneden ikke er markert som avstemt ennå.</>
+                                    )}
+                                </p>
                             </div>
 
                             {plan === null ? (
