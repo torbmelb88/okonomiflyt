@@ -49,6 +49,7 @@ export default function TransactionsPanel({
 
     const [selectedAccount, setSelectedAccount] = useState(null);
     const [selectedBudgetId, setSelectedBudgetId] = useState(null); // null = all budgets
+    const [selectedPostKey, setSelectedPostKey] = useState(''); // '' = all budget items
     const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, id: null, type: null, count: 0 });
     const [sortBy, setSortBy] = useState('date-desc');
     const [activeFilters, setActiveFilters] = useState([]);
@@ -117,6 +118,41 @@ export default function TransactionsPanel({
         ] },
     ];
     const extraFilters = filterGroups.flatMap(g => g.filters);
+
+    // Budget-item filter. A transaction is linked to a per-budget instance
+    // (budgetItemId); instances of the same library def across budgets and
+    // months count as one post, keyed by defId. Instances without a def
+    // (pre-migration) fall back to their name. The options are the posts that
+    // have transactions in the selected month, grouped by category.
+    const expenseById = new Map(expenses.map(e => [e.id, e]));
+    const postKeyOf = (t) => {
+        const inst = t.budgetItemId ? expenseById.get(t.budgetItemId) : null;
+        if (!inst) return null;
+        return inst.defId ? `def:${inst.defId}` : `name:${inst.name}`;
+    };
+    const postOptions = new Map();
+    for (const t of panelTransactions) {
+        if (t.month !== selectedMonth) continue;
+        const key = postKeyOf(t);
+        if (!key || postOptions.has(key)) continue;
+        const { name, category } = linkedLabel(expenseById.get(t.budgetItemId));
+        postOptions.set(key, { key, name: name || '(uten navn)', category: category || 'Annet' });
+    }
+    if (selectedPostKey && !postOptions.has(selectedPostKey)) {
+        // Keep the chosen post visible after a month change, so the filter
+        // does not silently point at an option that is no longer in the list.
+        const inst = expenses.find(e => (e.defId ? `def:${e.defId}` : `name:${e.name}`) === selectedPostKey);
+        const { name, category } = linkedLabel(inst);
+        postOptions.set(selectedPostKey, { key: selectedPostKey, name: name || '(uten navn)', category: category || 'Annet' });
+    }
+    const postGroups = [...postOptions.values()]
+        .sort((a, b) => a.category.localeCompare(b.category, 'no-NO') || a.name.localeCompare(b.name, 'no-NO'))
+        .reduce((acc, o) => {
+            const g = acc.find(x => x.category === o.category) || acc[acc.push({ category: o.category, posts: [] }) - 1];
+            g.posts.push(o);
+            return acc;
+        }, []);
+    const isFiltered = activeFilters.length > 0 || !!selectedBudgetId || !!selectedPostKey;
     const toggleFilter = (key) => setActiveFilters(prev =>
         prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     );
@@ -138,6 +174,7 @@ export default function TransactionsPanel({
     )
         .filter(t => t.month === selectedMonth)
         .filter(t => !selectedBudgetId || t.budgetId === selectedBudgetId)
+        .filter(t => !selectedPostKey || postKeyOf(t) === selectedPostKey)
         .filter(t => extraFilters.every(f => !activeFilters.includes(f.key) || f.test(t)))
         .sort(sortComparators[sortBy] || sortComparators['date-desc']);
 
@@ -397,6 +434,20 @@ export default function TransactionsPanel({
                             </optgroup>
                         )}
                     </select>
+                    <select
+                        value={selectedPostKey}
+                        onChange={(e) => setSelectedPostKey(e.target.value)}
+                        className={clsx(selectCls, selectedPostKey && 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300')}
+                        title="Budsjettpost — bare poster med transaksjoner i valgt måned"
+                        disabled={postGroups.length === 0}
+                    >
+                        <option value="">Alle budsjettposter</option>
+                        {postGroups.map(g => (
+                            <optgroup key={g.category} label={g.category}>
+                                {g.posts.map(o => <option key={o.key} value={o.key}>{o.name}</option>)}
+                            </optgroup>
+                        ))}
+                    </select>
                     <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={selectCls} title="Sortering">
                         <option value="date-desc">Dato (nyeste først)</option>
                         <option value="date-asc">Dato (eldste først)</option>
@@ -419,8 +470,8 @@ export default function TransactionsPanel({
                         {activeFilters.length > 0 && <span className="ml-0.5 px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold">{activeFilters.length}</span>}
                         {showMoreFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
-                    {activeFilters.length > 0 && (
-                        <button onClick={() => setActiveFilters([])} className="inline-flex items-center gap-1 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
+                    {(activeFilters.length > 0 || selectedPostKey) && (
+                        <button onClick={() => { setActiveFilters([]); setSelectedPostKey(''); }} className="inline-flex items-center gap-1 px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
                             <X className="w-3.5 h-3.5" />Nullstill
                         </button>
                     )}
@@ -457,7 +508,7 @@ export default function TransactionsPanel({
                 <div className="px-4 md:px-6 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                         <h2 className="font-bold text-gray-900 dark:text-gray-100 truncate">{selectedAccount ? selectedAccount.name : 'Alle transaksjoner'}</h2>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">{displayedTransactions.length} transaksjoner{activeFilters.length > 0 || selectedBudgetId ? ' (filtrert)' : ''}</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{displayedTransactions.length} transaksjoner{isFiltered ? ' (filtrert)' : ''}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <button onClick={handleManualReconcile} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm text-sm" title="Gå gjennom de uavstemte radene som vises">
@@ -479,7 +530,7 @@ export default function TransactionsPanel({
                         ))
                     ) : (
                         <div className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
-                            {activeFilters.length > 0
+                            {isFiltered
                                 ? 'Ingen transaksjoner matcher de valgte filtrene denne måneden.'
                                 : 'Ingen transaksjoner funnet for denne måneden.'}
                         </div>
