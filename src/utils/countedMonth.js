@@ -47,3 +47,24 @@ export const formatMonthShort = (month) => {
 /** One wording everywhere: badge text for a moved row. */
 export const countedInLabel = (t) => `Telles i ${formatMonthShort(t.month)}`;
 export const countedInTitle = (t) => `Betalt ${t.date}, telles i ${formatMonthLong(t.month)} i oppgjør, budsjett og oversikt.`;
+
+// Betalingsmåned vs. forbruksmåned. Oppgjør and Min Oversikt are shown per
+// the month you stand in (the one you pay in); what is settled then is the
+// previous month's consumption. One wording for that everywhere.
+
+/** «oktober» — month name only. */
+const monthName = (month) => {
+    if (!month) return '';
+    const [y, m] = month.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('no-NO', { month: 'long' });
+};
+
+/** The consumption month a payment month settles. */
+export const settlementBasisMonth = (payMonth) => addMonths(payMonth, -1);
+
+/** «forbruk i oktober» — line label suffix. */
+export const basisLabel = (basisMonth) => `forbruk i ${monthName(basisMonth)}`;
+
+/** «Forbruk i oktober · betales i november» — page subtitle. */
+export const settlementHeaderLabel = (payMonth) =>
+    `Forbruk i ${monthName(settlementBasisMonth(payMonth))} · betales i ${monthName(payMonth)}`;

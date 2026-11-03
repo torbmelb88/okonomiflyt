@@ -8,24 +8,31 @@ import { totalBufferContributionPerParty } from '../../utils/bufferPlan';
 import { reconcileState } from '../../utils/reconciliation';
 import { coveredByAccountOf, computeSplit, readRoundingMode } from '../../utils/settlement';
 import { coverIssues } from '../../utils/coverage';
+import { addMonths, basisLabel, formatMonthLong, settlementBasisMonth, settlementHeaderLabel } from '../../utils/countedMonth';
 
 /**
  * Oppgjør = settlement. Household-level, always the shared budget: what each
  * party transfers (utils/settlement.js computeSplit — the same computation
  * Min Oversikt shows), «betales fra andre kontoer», the buffer plan, the
  * gjennomreise red flag and the month-reconciled toggle.
+ *
+ * The month selector is the month you PAY in (`payMonth`, defaults to now),
+ * like Min Oversikt; everything is computed for the month before it
+ * (`basisMonth`, the consumption month — what the rows' `month` field and
+ * monthStatuses are keyed on). Standing in November you see October's
+ * settlement, labelled «Forbruk i oktober · betales i november».
  */
 export default function Oppgjor() {
     const { sharedBudget, accounts, allProjects, allTransactions, currentUser, loading, monthStatuses, isMonthReconciled } = useBudget();
-    const [selectedMonth, setSelectedMonth] = useState(() => {
+    const [payMonth, setPayMonth] = useState(() => {
         const now = new Date();
-        now.setMonth(now.getMonth() - 1); // previous month — what you settle now
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     });
+    const basisMonth = useMemo(() => settlementBasisMonth(payMonth), [payMonth]);
     const roundingMode = readRoundingMode();
 
-    const formatMonth = (m) => { const [y, mo] = m.split('-'); return new Date(y, parseInt(mo) - 1).toLocaleDateString('no-NO', { month: 'long', year: 'numeric' }); };
-    const changeMonth = (delta) => { const [y, mo] = selectedMonth.split('-').map(Number); const d = new Date(y, mo - 1 + delta); setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); };
+    const formatMonth = formatMonthLong;
+    const changeMonth = (delta) => setPayMonth(addMonths(payMonth, delta));
     const accountName = (id) => accounts.find(a => a.id === id)?.name || 'Konto';
     const fmt = (n) => Math.round(n).toLocaleString('no-NO');
 
@@ -38,33 +45,33 @@ export default function Oppgjor() {
             : [],
         [accounts, sharedBudget]
     );
-    const bufferPerParty = totalBufferContributionPerParty(bufferAccounts, selectedMonth, parties);
+    const bufferPerParty = totalBufferContributionPerParty(bufferAccounts, basisMonth, parties);
 
     const split = useMemo(
-        () => computeSplit({ transactions: allTransactions, sharedBudget, accounts, projects: allProjects, month: selectedMonth, userUid: currentUser?.uid, roundingMode }),
-        [allTransactions, sharedBudget, accounts, allProjects, selectedMonth, currentUser, roundingMode]
+        () => computeSplit({ transactions: allTransactions, sharedBudget, accounts, projects: allProjects, month: basisMonth, userUid: currentUser?.uid, roundingMode }),
+        [allTransactions, sharedBudget, accounts, allProjects, basisMonth, currentUser, roundingMode]
     );
 
     // Set on Transaksjoner, where the work is done; read here.
-    const monthReconciled = isMonthReconciled(selectedMonth);
-    const reconciledAt = monthStatuses.find(ms => ms.month === selectedMonth)?.reconciledAt;
+    const monthReconciled = isMonthReconciled(basisMonth);
+    const reconciledAt = monthStatuses.find(ms => ms.month === basisMonth)?.reconciledAt;
     // Rows the month can't really close on, shown as a hint under the status.
     const pending = useMemo(() => {
-        const states = allTransactions.filter(t => t.month === selectedMonth).map(reconcileState);
+        const states = allTransactions.filter(t => t.month === basisMonth).map(reconcileState);
         return {
             booked: states.filter(s => s === 'booked').length,
             unreconciled: states.filter(s => s === 'unreconciled').length,
         };
-    }, [allTransactions, selectedMonth]);
+    }, [allTransactions, basisMonth]);
     // Transfers on gjennomreise whose payment is missing or doesn't add up.
-    const coverProblems = useMemo(() => coverIssues(allTransactions, selectedMonth), [allTransactions, selectedMonth]);
+    const coverProblems = useMemo(() => coverIssues(allTransactions, basisMonth), [allTransactions, basisMonth]);
     const coverProblemCount = coverProblems.reduce((s, g) => s + g.expenses.length, 0);
     const pendingCount = pending.booked + pending.unreconciled + coverProblemCount;
 
     const coveredFromList = useMemo(() => {
         const byAcc = {};
         // The covering account comes from the row itself or from its project
-        for (const t of allTransactions.filter(t => t.month === selectedMonth)) {
+        for (const t of allTransactions.filter(t => t.month === basisMonth)) {
             const id = coveredByAccountOf(t, allProjects);
             if (!id) continue;
             if (!byAcc[id]) byAcc[id] = { accountId: id, total: 0, items: [] };
@@ -72,7 +79,7 @@ export default function Oppgjor() {
             byAcc[id].items.push(t);
         }
         return Object.values(byAcc);
-    }, [allTransactions, selectedMonth, allProjects]);
+    }, [allTransactions, basisMonth, allProjects]);
 
     if (loading) return <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 py-8 justify-center"><Loader2 className="w-5 h-5 animate-spin" /> Beregner oppgjør…</div>;
 
@@ -108,12 +115,13 @@ export default function Oppgjor() {
                     </div>
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Oppgjør</h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Fellesbudsjettet, hele husholdningen</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{settlementHeaderLabel(payMonth)}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">Fellesbudsjettet, hele husholdningen</p>
                     </div>
                 </div>
                 <div className="flex items-center space-x-2 bg-white dark:bg-gray-800 p-2 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                     <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"><ArrowRight className="w-5 h-5 transform rotate-180 text-gray-500" /></button>
-                    <span className="text-sm font-semibold capitalize min-w-[120px] text-center text-gray-900 dark:text-white">{formatMonth(selectedMonth)}</span>
+                    <span className="text-sm font-semibold capitalize min-w-[120px] text-center text-gray-900 dark:text-white">{formatMonth(payMonth)}</span>
                     <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"><ArrowRight className="w-5 h-5 text-gray-500" /></button>
                 </div>
             </div>
@@ -135,7 +143,7 @@ export default function Oppgjor() {
                     </div>
                     <div className="flex justify-between items-center text-sm pt-4 mt-4 border-t border-gray-100 dark:border-gray-700">
                         <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Fordeles:
-                            <InfoTip text="Summen som fordeles mellom dere denne måneden. Uavstemte kjøp, alt som holdes utenfor oppgjør (på transaksjon, prosjekt eller konto) og private deler av felles kjøp er ikke med. Dette er ikke det samme som forbruket på Budsjett-siden, som teller alle poster." />
+                            <InfoTip text="Summen som fordeles mellom dere for forbruksmåneden. Uavstemte kjøp, alt som holdes utenfor oppgjør (på transaksjon, prosjekt eller konto) og private deler av felles kjøp er ikke med. Dette er ikke det samme som forbruket på Budsjett-siden, som teller alle poster." />
                         </span>
                         <span className="font-medium dark:text-gray-200">{split.total.toLocaleString('no-NO', { maximumFractionDigits: 0 })} kr</span>
                     </div>
@@ -150,7 +158,7 @@ export default function Oppgjor() {
             {coveredFromList.length > 0 && (
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">Betales fra andre kontoer</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Overfør til felles regningskonto ({formatMonth(selectedMonth)})</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Overfør til felles regningskonto i {formatMonth(payMonth)} ({basisLabel(basisMonth)})</p>
                     <div className="space-y-3">
                         {coveredFromList.map(g => (
                             <div key={g.accountId} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3">
@@ -174,7 +182,7 @@ export default function Oppgjor() {
 
             {/* Buffer på felles regningskonto */}
             {bufferAccounts.map(a => (
-                <BufferCard key={a.id} account={a} parties={parties} settlementMonth={selectedMonth} />
+                <BufferCard key={a.id} account={a} parties={parties} settlementMonth={basisMonth} />
             ))}
 
             {/* Rødt flagg: penger som skulle komme inn og gå videre, men ikke henger sammen */}
@@ -222,13 +230,13 @@ export default function Oppgjor() {
                 <div className="text-sm">
                     {monthReconciled ? (
                         <span className="text-green-800 dark:text-green-200">
-                            <span className="capitalize font-medium">{formatMonth(selectedMonth)}</span> er markert som avstemt{reconciledAt ? ` ${new Date(reconciledAt).toLocaleDateString('no-NO', { day: 'numeric', month: 'long' })}` : ''}.
+                            <span className="capitalize font-medium">{formatMonth(basisMonth)}</span> er markert som avstemt{reconciledAt ? ` ${new Date(reconciledAt).toLocaleDateString('no-NO', { day: 'numeric', month: 'long' })}` : ''}.
                         </span>
                     ) : (
                         <span className="text-gray-600 dark:text-gray-400">
-                            <span className="capitalize font-medium">{formatMonth(selectedMonth)}</span> er ikke markert som avstemt ennå
+                            <span className="capitalize font-medium">{formatMonth(basisMonth)}</span> er ikke markert som avstemt ennå
                             {pendingCount > 0 && <span className={coverProblemCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'}> ({pendingCount} {pendingCount === 1 ? 'rad venter' : 'rader venter'})</span>}
-                            . Det gjøres på <Link to="/transaksjoner" className="underline">Transaksjoner</Link> når alle radene er håndtert.
+. Beløpene over kan fortsatt endre seg. Avstemmingen gjøres på <Link to="/transaksjoner" className="underline">Transaksjoner</Link> når alle radene er håndtert.
                         </span>
                     )}
                 </div>
