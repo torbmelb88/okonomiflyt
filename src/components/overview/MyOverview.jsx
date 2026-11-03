@@ -13,6 +13,7 @@ import { coveringIncomeIds, isCoverNeutral } from '../../utils/coverage';
 import { heldOutOfTransfer, coveredByAccountOf, computeSplit, readRoundingMode } from '../../utils/settlement';
 import { isMoneyMovement, isSalary } from '../../utils/kinds';
 import { useDialog } from '../../contexts/DialogContext';
+import { basisLabel, settlementHeaderLabel } from '../../utils/countedMonth';
 
 export default function MyOverview() {
     const { notify } = useDialog();
@@ -325,13 +326,13 @@ export default function MyOverview() {
                                 </div>
                                 <div>
                                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">Til Felleskonto</h3>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Total overføring</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">{settlementHeaderLabel(selectedMonth)}</p>
                                 </div>
                             </div>
 
                             <div className="space-y-3 mb-6">
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Andel fellesutgifter ({formatMonth(prevMonthStr)})
+                                    <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Andel fellesutgifter ({basisLabel(prevMonthStr)})
                                         <InfoTip text="Din andel av forrige måneds fellesutgifter etter fordelingsnøkkelen, minus utlegg du har lagt ut, pluss private deler av felles kjøp som er dine. Samme tall som «Du betaler» på Oppgjør. Uavstemte kjøp teller ikke — de må knyttes til en budsjettpost først." />
                                     </span>
                                     <span className="font-medium text-gray-900 dark:text-white">
@@ -339,7 +340,7 @@ export default function MyOverview() {
                                     </span>
                                 </div>
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Kredittkort ({formatMonth(prevMonthStr)})
+                                    <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Kredittkort ({basisLabel(prevMonthStr)})
                                         <InfoTip text="Ditt private kredittkortforbruk forrige måned, som forfaller nå. Felleskjøp på kortet ligger i «Andel fellesutgifter», ikke her. Returer trekkes fra." />
                                     </span>
                                     <span className="font-medium text-gray-900 dark:text-white">{creditCardUsage.toLocaleString('no-NO')} kr</span>
@@ -374,14 +375,14 @@ export default function MyOverview() {
                                     </div>
                                     <div>
                                         <h3 className="text-lg font-bold text-gray-900 dark:text-white">Til Regningskonto</h3>
-                                        <p className="text-sm text-gray-500 dark:text-gray-400">{billAccounts.map(a => a.name).join(', ')}</p>
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">{settlementHeaderLabel(selectedMonth)} · {billAccounts.map(a => a.name).join(', ')}</p>
                                     </div>
                                 </div>
 
                                 <div className="space-y-3 mb-6">
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Faktisk forbruk ({formatMonth(prevMonthStr)})
-                                            <InfoTip text="Så mye gikk faktisk ut fra regningskontoen forrige måned — det er beløpet du fyller på nå. Overføringer, sparing og kortregninger er holdt utenfor." />
+                                        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">Regningskonto ({basisLabel(prevMonthStr)})
+                                            <InfoTip text="Så mye gikk faktisk ut fra regningskontoen i forbruksmåneden — det er beløpet du fyller på nå. Overføringer, sparing og kortregninger er holdt utenfor." />
                                         </span>
                                         <span className="font-medium text-gray-900 dark:text-white">{billAccountUsage.toLocaleString('no-NO')} kr</span>
                                     </div>
