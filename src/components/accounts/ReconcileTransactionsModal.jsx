@@ -193,10 +193,13 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         setCurrency(t?.currency && t.currency !== 'NOK' ? t.currency : '');
         // «Flere valg» opens by itself when something in it is already set
         setShowMore(!!(t?.isUnnecessary || t?.excludeFromSharedCalc || t?.paidPrivatelyBy || t?.privateAmount > 0 || t?.awaitingRefund || t?.comment || (live && isCoveredExpense(live)) || (t?.currency && t.currency !== 'NOK') || isCountedInOtherMonth(t)));
-        // Budget: the account's default, or the stored one for a reconciled row
+        // Budget: the stored one for a row that is already categorized (reconciled,
+        // or «bokført» from the companion app where the budget was picked by
+        // hand); otherwise the account's default.
         const txAccount = accounts.find(a => a.id === t?.accountId);
         const accountDefault = txAccount?.defaultBudgetId || txAccount?.budgetId;
-        setSelectedBudgetId(t?.reconciled ? (t.budgetId || accountDefault || '') : (accountDefault || t?.budgetId || ''));
+        const storedIsChosen = t?.reconciled || !!t?.budgetItemId;
+        setSelectedBudgetId(storedIsChosen ? (t.budgetId || accountDefault || '') : (accountDefault || t?.budgetId || ''));
     }
 
     if (!isOpen || !transactions || transactions.length === 0 || !currentTransaction) return null;
