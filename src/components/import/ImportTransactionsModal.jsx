@@ -145,10 +145,11 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                     const twinCandidate = !already && pacc && existing
                         .filter(t => reportedBookedIds.has(t.externalId) && !twinClaimedIds.has(t.id) && sameMoney(t))
                         .sort((a, b) => Math.abs(new Date(a.date) - new Date(s.date)) - Math.abs(new Date(b.date) - new Date(s.date)))[0];
-                    // A same-day booked twin beats a loose companion match
-                    // (which may be an older purchase of the same amount).
-                    const sameDayTwin = twinCandidate && twinCandidate.date === s.date;
-                    const logged = !already && !sameDayTwin && pacc && existing.find(t => !t.externalId && sameMoney(t));
+                    // A companion match wins: SB1 dates card purchases by
+                    // BOOKING day, so repeat purchases of the same amount on
+                    // consecutive days (three × 118,9 on 10.–12. Nov, all real)
+                    // make a same-amount booked row no proof of a twin.
+                    const logged = !already && pacc && existing.find(t => !t.externalId && sameMoney(t));
                     const twin = !logged ? twinCandidate : null;
                     if (twin) twinClaimedIds.add(twin.id);
                     const note = already
@@ -158,7 +159,7 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                         : logged
                             ? `logget i companion-appen som «${logged.name}» — kobles ved bokføring`
                             : twin
-                                ? `allerede hentet som bokført «${twin.name}» (${twin.date}) — banken viser den i tillegg som ubokført`
+                                ? `trolig samme som allerede hentet «${twin.name}» (${twin.date}) som banken viser dobbelt — er det et nytt kjøp, hentes det ved bokføring`
                                 : 'ny — hentes når banken har bokført den';
                     pendingRows.push({ ...s, pendingNote: note });
                 }
