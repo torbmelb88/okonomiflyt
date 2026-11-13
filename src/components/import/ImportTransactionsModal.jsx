@@ -110,6 +110,16 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
         // the other row lost its identity and came back as a twin later.
         const matchClaimedIds = new Set();
         const pendingRows = [];
+        // SB1 sometimes reports a transaction twice: booked (real id, already
+        // imported) AND as a zero-id copy in its "recent" bucket (seen
+        // 2026-11-13: the 23:30 sync re-listed the day's salary, transfer and
+        // a card purchase that were imported and reconciled hours earlier).
+        // Booked ids the bank still reports, so a pending copy can be
+        // recognised as "already fetched" rather than "new". One-to-one.
+        const reportedBookedIds = new Set(staged
+            .filter(s => s.externalId && !isUnbooked(s) && (!latestSync || s.syncedAt === latestSync))
+            .map(s => s.externalId));
+        const twinClaimedIds = new Set();
         let alreadyImported = 0, noAccount = 0, noBudget = 0, beforeFrom = 0;
 
         for (const s of staged) {
@@ -126,17 +136,30 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                     // as "waiting for the bank", not "not fetched".
                     const pacc = accByKey.get(s.accountKey);
                     const already = existingByExternalId.get(s.externalId);
-                    const logged = !already && pacc && existing.find(t =>
-                        t.accountId === pacc.id && !t.externalId && (!t.currency || t.currency === 'NOK') &&
+                    const sameMoney = (t) =>
+                        t.accountId === pacc.id && (!t.currency || t.currency === 'NOK') &&
                         t.type === s.type &&
-                        Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 && t.date && datesClose(t.date, s.date));
+                        Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 && t.date && datesClose(t.date, s.date);
+                    // Booked twin: same money, already imported under a real id
+                    // the bank still reports. Same date first, then closest.
+                    const twinCandidate = !already && pacc && existing
+                        .filter(t => reportedBookedIds.has(t.externalId) && !twinClaimedIds.has(t.id) && sameMoney(t))
+                        .sort((a, b) => Math.abs(new Date(a.date) - new Date(s.date)) - Math.abs(new Date(b.date) - new Date(s.date)))[0];
+                    // A same-day booked twin beats a loose companion match
+                    // (which may be an older purchase of the same amount).
+                    const sameDayTwin = twinCandidate && twinCandidate.date === s.date;
+                    const logged = !already && !sameDayTwin && pacc && existing.find(t => !t.externalId && sameMoney(t));
+                    const twin = !logged ? twinCandidate : null;
+                    if (twin) twinClaimedIds.add(twin.id);
                     const note = already
                         ? (isSelfReported({ source: already.origin })
                             ? `allerede i appen som «${already.name}» — beholder navnet, får bankens ID ved bokføring`
                             : 'allerede hentet — får bankens navn og ID ved bokføring')
                         : logged
                             ? `logget i companion-appen som «${logged.name}» — kobles ved bokføring`
-                            : 'ny — hentes når banken har bokført den';
+                            : twin
+                                ? `allerede hentet som bokført «${twin.name}» (${twin.date}) — banken viser den i tillegg som ubokført`
+                                : 'ny — hentes når banken har bokført den';
                     pendingRows.push({ ...s, pendingNote: note });
                 }
                 continue;
