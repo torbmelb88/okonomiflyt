@@ -186,8 +186,12 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                 // Already imported — refresh the name if it improved and the
                 // transaction is still unhandled (don't touch reconciled ones).
                 const ex = existingByExternalId.get(s.externalId);
-                if (!ex.reconciled && !ex.budgetItemId && s.name && ex.name !== s.name) {
+                if (!ex.reconciled && !ex.budgetItemId && s.name && ex.name !== s.name && !isSelfReported({ source: ex.origin })) {
                     toUpdate.push({ id: ex.id, name: s.name });
+                } else if (isSelfReported({ source: ex.origin }) && s.name && ex.bankName !== s.name) {
+                    // Companion row linked to this bank row: keep its own name,
+                    // store the bank's beside it (display name, utils/merchantName).
+                    toUpdate.push({ id: ex.id, bankName: s.name });
                 } else {
                     alreadyImported++;
                 }
@@ -249,6 +253,7 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                     // really came from: a companion-app row keeps its own name
                     // and purchase date if the bank later re-ids it.
                     origin: match.source || null,
+                    bankName: s.name || null,
                 });
             } else if (fx) {
                 fxClaimedIds.add(fx.id);
@@ -286,7 +291,7 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                 toRebook.push({
                     id: rebook.id,
                     externalId: s.externalId,
-                    ...(keepIdentity ? {} : {
+                    ...(keepIdentity ? { bankName: s.name || null } : {
                         name: s.name || rebook.name,
                         date: s.date,
                         month: monthAfterRedate(rebook, s.date), // a «telles i» move survives the bank's date
@@ -326,10 +331,11 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                 if (ref?.id) createdIds.push(ref.id);
             }
             for (const m of plan.toMerge) {
-                await api.updateDocument('transactions', m.existingId, { externalId: m.externalId, source: 'sb1', reconciled: m.reconciled, origin: m.origin });
+                await api.updateDocument('transactions', m.existingId, { externalId: m.externalId, source: 'sb1', reconciled: m.reconciled, origin: m.origin, bankName: m.bankName });
             }
             for (const u of plan.toUpdate) {
-                await api.updateDocument('transactions', u.id, { name: u.name });
+                const { id, ...patch } = u;
+                await api.updateDocument('transactions', id, patch);
             }
             for (const r of plan.toRebook) {
                 const { id, ...patch } = r;

@@ -36,7 +36,7 @@ export default function TransactionsPanel({
     const {
         allExpenses: expenses, allTransactions: transactions, allProjects: projects, allProjects, receipts, budgets,
         budgetItemDefs, categories,
-        deleteTransaction, deleteTransactions,
+        deleteTransaction, deleteTransactions, displayName,
     } = useBudget();
     // The name to show for a linked budget item: the library def's current
     // name and category win over the instance's stored copy (instances logged
@@ -162,7 +162,7 @@ export default function TransactionsPanel({
         'date-asc': (a, b) => (a.date || '').localeCompare(b.date || ''),
         'amount-desc': (a, b) => b.amount - a.amount,
         'amount-asc': (a, b) => a.amount - b.amount,
-        'name-asc': (a, b) => (a.name || '').localeCompare(b.name || '', 'no-NO'),
+        'name-asc': (a, b) => displayName(a).localeCompare(displayName(b), 'no-NO'),
         'account-asc': (a, b) =>
             (accountNameById.get(a.accountId) || '').localeCompare(accountNameById.get(b.accountId) || '', 'no-NO') ||
             (b.date || '').localeCompare(a.date || ''),
@@ -283,7 +283,7 @@ export default function TransactionsPanel({
                     )}
                     <div>
                         <div className="font-medium text-gray-900 dark:text-gray-100">
-                            {trans.name}
+                            {displayName(trans)}
                             {exclusionReason(trans, accounts, allProjects) && <span className="ml-1 text-orange-500" title={EXCLUSION_LABEL[exclusionReason(trans, accounts, allProjects)]}>*</span>}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center flex-wrap gap-x-2 gap-y-0.5">
@@ -323,8 +323,8 @@ export default function TransactionsPanel({
                                 </span>
                             )}
                             {trans.isRefund && !trans.refundSplit && (
-                                <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Refusjon av ${refundOriginal.name} (${refundOriginal.date})${trans.refundParentId ? ' — del av en fordelt innbetaling' : ''}` : 'Refusjon uten kobling til et kjøp'}>
-                                    <Undo2 className="w-3 h-3 flex-shrink-0" />Refusjon{refundOriginal ? ` av ${refundOriginal.name}` : ''}{trans.refundParentId ? ' (del)' : ''}
+                                <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400" title={refundOriginal ? `Refusjon av ${displayName(refundOriginal)} (${refundOriginal.date})${trans.refundParentId ? ' — del av en fordelt innbetaling' : ''}` : 'Refusjon uten kobling til et kjøp'}>
+                                    <Undo2 className="w-3 h-3 flex-shrink-0" />Refusjon{refundOriginal ? ` av ${displayName(refundOriginal)}` : ''}{trans.refundParentId ? ' (del)' : ''}
                                 </span>
                             )}
                             {trans.awaitingRefund && (

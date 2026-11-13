@@ -7,7 +7,7 @@ import { exclusionReason, EXCLUSION_LABEL } from '../../utils/settlement';
 import { isCountedInOtherMonth, countedInLabel, countedInTitle } from '../../utils/countedMonth';
 
 export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, selectedMonth }) {
-    const { transactions, accounts, allProjects } = useBudget();
+    const { transactions, accounts, allProjects, displayName } = useBudget();
 
     // Editing (payer, exclusion, unlinking etc.) happens in the reconcile
     // dialog — same flow as the edit button in the transaction list.
@@ -60,7 +60,7 @@ export default function BudgetItemDetailsModal({ isOpen, onClose, budgetItem, se
                                 <div key={trans.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-100 dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-700 transition-colors group">
                                     <div>
                                         <p className="font-medium text-gray-900 dark:text-gray-100">
-                                            {trans.name}
+                                            {displayName(trans)}
                                         </p>
                                         <div className="flex items-center gap-2">
                                             <p className="text-xs text-gray-500 dark:text-gray-400">{trans.date}</p>

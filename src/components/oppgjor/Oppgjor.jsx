@@ -23,7 +23,7 @@ import { addMonths, basisLabel, formatMonthLong, settlementBasisMonth, settlemen
  * settlement, labelled «Forbruk i oktober · betales i november».
  */
 export default function Oppgjor() {
-    const { sharedBudget, accounts, allProjects, allTransactions, currentUser, loading, monthStatuses, isMonthReconciled } = useBudget();
+    const { sharedBudget, accounts, allProjects, allTransactions, currentUser, loading, monthStatuses, isMonthReconciled, displayName } = useBudget();
     const [payMonth, setPayMonth] = useState(() => {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -169,7 +169,7 @@ export default function Oppgjor() {
                                 <div className="space-y-1">
                                     {g.items.map(t => (
                                         <div key={t.id} className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                                            <span className="truncate mr-2">{t.date} · {t.name}</span>
+                                            <span className="truncate mr-2">{t.date} · {displayName(t)}</span>
                                             <span className="flex-shrink-0">{fmt(t.amount)} kr</span>
                                         </div>
                                     ))}
@@ -207,13 +207,13 @@ export default function Oppgjor() {
                                 <div className="space-y-1">
                                     {g.expenses.map(t => (
                                         <div key={t.id} className="flex justify-between text-sm text-gray-800 dark:text-gray-200">
-                                            <span className="truncate mr-2">{t.date} · {t.name}</span>
+                                            <span className="truncate mr-2">{t.date} · {displayName(t)}</span>
                                             <span className="flex-shrink-0 text-red-600 dark:text-red-400">−{t.amount.toLocaleString('no-NO')} kr</span>
                                         </div>
                                     ))}
                                     {g.incomes.map(t => (
                                         <div key={t.id} className="flex justify-between text-sm text-gray-800 dark:text-gray-200">
-                                            <span className="truncate mr-2">{t.date} · {t.name}</span>
+                                            <span className="truncate mr-2">{t.date} · {displayName(t)}</span>
                                             <span className="flex-shrink-0 text-green-600 dark:text-green-400">+{t.amount.toLocaleString('no-NO')} kr</span>
                                         </div>
                                     ))}

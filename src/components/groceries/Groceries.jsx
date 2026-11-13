@@ -456,6 +456,7 @@ function EmptyHint({ text }) {
 }
 
 function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, onLink, onUnlink }) {
+    const { displayName } = useBudget();
     const { notify } = useDialog();
     const [linking, setLinking] = useState(false);
     const isMatched = !!receipt.transactionId;
@@ -540,7 +541,7 @@ function ReceiptRow({ receipt, items, expanded, onToggle, onDelete, candidates, 
                             className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 hover:underline disabled:opacity-50"
                         >
                             <Link2 className="w-3.5 h-3.5" />
-                            Koble til «{t.name}» ({t.date})
+                            Koble til «{displayName(t)}» ({t.date})
                         </button>
                     ))}
                 </div>

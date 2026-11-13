@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Plus } from 'lucide-react';
 import clsx from 'clsx';
+import { useBudget } from '../../contexts/BudgetContext';
 import { refundStatus, allocationsTotal, allocationComplete, parseAmount } from '../../utils/refunds';
 
 /**
@@ -12,6 +13,7 @@ import { refundStatus, allocationsTotal, allocationComplete, parseAmount } from 
  * allocations: [{ transactionId, amount (string), complete (bool|null) }]
  */
 export default function RefundAllocationEditor({ income, allocations, onChange, candidates, allTransactions, accounts, lockedIds = [] }) {
+    const { displayName } = useBudget();
     const [search, setSearch] = useState('');
     const [adding, setAdding] = useState(false);
 
@@ -63,7 +65,7 @@ export default function RefundAllocationEditor({ income, allocations, onChange, 
                     <div key={a.transactionId} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 px-3 py-2 space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
                             <span className="min-w-0">
-                                <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{displayName(t)}</span>
                                 <span className="block text-xs text-gray-500 dark:text-gray-400">
                                     {t.date}{accountName(t.accountId) ? ` • ${accountName(t.accountId)}` : ''} • kjøp {fmt(t.amount)} kr
                                     {t.awaitingRefund && ` • utestående ${fmt(outstanding)} kr`}
@@ -113,7 +115,7 @@ export default function RefundAllocationEditor({ income, allocations, onChange, 
                             return (
                                 <button key={t.id} onClick={() => add(t)} className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                     <span className="min-w-0">
-                                        <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                        <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{displayName(t)}</span>
                                         <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{accountName(t.accountId) ? ` • ${accountName(t.accountId)}` : ''}</span>
                                         {t.awaitingRefund && (
                                             <span className="inline-flex items-center mt-0.5 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider">

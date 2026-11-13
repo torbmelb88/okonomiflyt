@@ -3,6 +3,7 @@ import { api } from '../services/firebase';
 import { useAuth } from './AuthContext';
 import { isSelfReported, reconcilesOnLink } from '../utils/reconciliation';
 import { coverLinkIds, isCoveredExpense } from '../utils/coverage';
+import { makeDisplayName, aliasKey } from '../utils/merchantName';
 
 const BudgetContext = createContext();
 
@@ -448,6 +449,9 @@ export function BudgetProvider({ children }) {
             // Remember the self-reported side (see ImportTransactionsModal):
             // if the bank re-ids the row later, it keeps its own name/date.
             origin: keep.origin || remove.origin || (isSelfReported(keep) ? keep.source : isSelfReported(remove) ? remove.source : null),
+            // The bank's own wording beside a kept self-reported name (display only)
+            bankName: keep.bankName || remove.bankName ||
+                (isSelfReported(keep) && !isSelfReported(remove) ? remove.name : null) || null,
             // Merging a self-reported copy (companion app/MCP) with the bank's
             // copy IS the bank match — that is what makes the pair avstemt,
             // provided the purchase is also categorized.
@@ -863,6 +867,35 @@ export function BudgetProvider({ children }) {
             throw error;
         }
     };
+    // Merchant aliases («X vises som Y») — display only, see utils/merchantName.js
+    const [merchantAliases, setMerchantAliases] = useState([]);
+    useEffect(() => {
+        if (!currentUser) { setMerchantAliases([]); return; }
+        api.getCollection('merchantAliases')
+            .then(all => setMerchantAliases(all.filter(a => a.userId === currentUser.uid)))
+            .catch(error => console.error('Error fetching merchant aliases:', error));
+    }, [currentUser]);
+    const displayName = useMemo(() => makeDisplayName(merchantAliases), [merchantAliases]);
+
+    // One alias per (pattern, account): saving again replaces the old one.
+    const saveMerchantAlias = async ({ pattern, displayName: shown, accountId = null }) => {
+        if (!currentUser || !pattern?.trim() || !shown?.trim()) return;
+        const key = aliasKey(pattern);
+        const existing = merchantAliases.find(a => aliasKey(a.pattern) === key && (a.accountId || null) === (accountId || null));
+        const data = { pattern: pattern.trim(), displayName: shown.trim(), accountId: accountId || null, userId: currentUser.uid };
+        if (existing) {
+            await api.updateDocument('merchantAliases', existing.id, data);
+            setMerchantAliases(prev => prev.map(a => a.id === existing.id ? { ...a, ...data } : a));
+        } else {
+            const ref = await api.addDocument('merchantAliases', data);
+            setMerchantAliases(prev => [...prev, { id: ref.id, ...data }]);
+        }
+    };
+    const deleteMerchantAlias = async (id) => {
+        await api.deleteDocument('merchantAliases', id);
+        setMerchantAliases(prev => prev.filter(a => a.id !== id));
+    };
+
     // Categories State
     const [categories, setCategories] = useState([]);
 
@@ -1283,7 +1316,11 @@ export function BudgetProvider({ children }) {
         getAllReceiptItems,
         deleteReceipt,
         linkReceiptToTransaction,
-        unlinkReceipt
+        unlinkReceipt,
+        merchantAliases,
+        displayName,
+        saveMerchantAlias,
+        deleteMerchantAlias
         // The action functions are intentionally left out of the deps: they are
         // recreated each render, but all state they close over is listed below,
         // so the memoized value always exposes up-to-date functions.
@@ -1292,7 +1329,7 @@ export function BudgetProvider({ children }) {
         currentUser, budgets, activeBudget, activeBudgetId,
         expenses, allExpenses, transactions, allTransactions, accounts, loading,
         categories, budgetItemDefs, monthlyBudgets, monthStatuses, projects,
-        receipts, receiptItemsCache, bankBalances
+        receipts, receiptItemsCache, bankBalances, merchantAliases, displayName
     ]);
 
     return (

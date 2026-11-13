@@ -7,6 +7,7 @@ import InfoTip from '../common/InfoTip';
 import { findBudgetItemSuggestion } from '../../utils/textMatch';
 import { FOREIGN_CURRENCIES } from '../../utils/currency';
 import { reconcilesOnLink, isHandled, isSelfReported } from '../../utils/reconciliation';
+import { cleanMerchantName, aliasKey } from '../../utils/merchantName';
 import { refundStatus, refundsOf, allocationsValid, allocationComplete, parseAmount } from '../../utils/refunds';
 import RefundAllocationEditor from './RefundAllocationEditor';
 import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
@@ -52,7 +53,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         allExpenses: expenses, budgetItemDefs, categories, ensureInstanceForDef,
         addCategory, addBudgetItemDef, updateTransaction, accounts, budgets, allProjects, allTransactions,
         linkRefund, linkRefundSplit, unlinkRefund, isMonthReconciled,
-        setExpenseCover, setIncomeCover,
+        setExpenseCover, setIncomeCover, displayName, merchantAliases, saveMerchantAlias,
     } = useBudget();
 
     // --- queue ---
@@ -69,6 +70,10 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
     const [processedCount, setProcessedCount] = useState(0);
     const [bulkSaving, setBulkSaving] = useState(false);
     const [saving, setSaving] = useState(false);
+    // «Vis som …» alias editor (see handleSaveAlias)
+    const [aliasEditFor, setAliasEditFor] = useState(null);
+    const [aliasText, setAliasText] = useState('');
+    const [aliasScoped, setAliasScoped] = useState(false);
 
     // --- 1. hva er dette ---
     const [kind, setKind] = useState(null);
@@ -596,6 +601,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                 externalId: null,
                 source: liveTx.origin,
                 origin: null,
+                bankName: null,
                 reconciled: false,
                 // A foreign purchase took over the bank's NOK amount on link
                 ...(liveTx.originalCurrency ? {
@@ -608,6 +614,22 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         } catch (error) {
             console.error('Failed to unlink bank row', error);
             notify({ message: 'Kunne ikke koble fra banken.', variant: 'error' });
+        }
+    };
+
+    // Display name («Vis som …»): an alias on the most specific raw name —
+    // the bank's when the row has one, since «Extra» alone could be any Extra.
+    const rawNames = [...new Set([liveTx.name, liveTx.bankName].filter(Boolean))];
+    const aliasPattern = cleanMerchantName(liveTx.bankName || liveTx.name);
+    const existingAlias = merchantAliases.find(a => rawNames.some(n => aliasKey(a.pattern) === aliasKey(n)) && (!a.accountId || a.accountId === liveTx.accountId));
+    const handleSaveAlias = async () => {
+        if (!aliasText.trim()) return;
+        try {
+            await saveMerchantAlias({ pattern: aliasPattern, displayName: aliasText, accountId: aliasScoped ? liveTx.accountId : null });
+            setAliasEditFor(null);
+        } catch (error) {
+            console.error('Failed to save alias', error);
+            notify({ message: 'Kunne ikke lagre visningsnavnet.', variant: 'error' });
         }
     };
 
@@ -692,7 +714,30 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                         <Edit2 className="w-3 h-3 ml-2 text-blue-400 opacity-50 group-hover:opacity-100 transition-opacity" />
                                     </button>
                                 )}
-                                <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 break-words">{currentTransaction.name}</h3>
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 break-words">{displayName(liveTx)}</h3>
+                                {rawNames.some(n => n !== displayName(liveTx)) && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 break-words">
+                                        {rawNames.map((n, i) => <span key={i}>{i > 0 && ' · '}{rawNames.length > 1 ? (i === 0 ? 'Eget navn: ' : 'Bankens: ') : 'Opprinnelig: '}«{n}»</span>)}
+                                    </p>
+                                )}
+                                {aliasEditFor === liveTx.id ? (
+                                    <div className="mt-2 space-y-1.5">
+                                        <div className="flex items-center gap-2">
+                                            <input value={aliasText} onChange={(e) => setAliasText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); handleSaveAlias(); } }} className={inputCls} placeholder="Vis som …" autoFocus />
+                                            <button onClick={handleSaveAlias} disabled={!aliasText.trim()} className="p-1 text-green-600 hover:bg-green-100 rounded dark:hover:bg-green-900/30 disabled:opacity-40" title="Lagre visningsnavn"><Check className="w-4 h-4" /></button>
+                                            <button onClick={() => setAliasEditFor(null)} className="p-1 text-red-600 hover:bg-red-100 rounded dark:hover:bg-red-900/30" title="Avbryt"><X className="w-4 h-4" /></button>
+                                        </div>
+                                        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+                                            <input type="checkbox" checked={aliasScoped} onChange={(e) => setAliasScoped(e.target.checked)} />
+                                            Bare på {account?.name || 'denne kontoen'}
+                                        </label>
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400">Gjelder alle transaksjoner som heter «{aliasPattern}» (store/små bokstaver og tallprefiks spiller ingen rolle). Lagres med en gang. Selve navnet endres ikke.</p>
+                                    </div>
+                                ) : (
+                                    <button onClick={() => { setAliasEditFor(liveTx.id); setAliasText(displayName(liveTx)); setAliasScoped(!!existingAlias?.accountId); }} className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline" title="Velg hvordan denne butikken vises overalt i appen">
+                                        {existingAlias ? `Vises som «${existingAlias.displayName}» — endre` : 'Vis som …'}
+                                    </button>
+                                )}
                                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                                     {account && <span className="flex items-center gap-1"><CreditCard className="w-3 h-3" />{account.name}</span>}
                                     {currentTransaction.category && !isKindCategory(currentTransaction) && <span>· {currentTransaction.category}</span>}
@@ -876,7 +921,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                     return (
                                                         <button key={t.id} onClick={() => { toggleAllocation(t); setRefundUnlinked(false); }} className={clsx("w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors", picked ? "bg-teal-100 dark:bg-teal-900/40" : "hover:bg-gray-50 dark:hover:bg-gray-700/50")}>
                                                             <span className="min-w-0">
-                                                                <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{picked ? '✓ ' : ''}{t.name}</span>
+                                                                <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{picked ? '✓ ' : ''}{displayName(t)}</span>
                                                                 <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{accountName(t.accountId) ? ` • ${accountName(t.accountId)}` : ''}</span>
                                                                 {t.awaitingRefund && (() => { const info = refundStatus(t, allTransactions); return (
                                                                     <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-[10px] font-bold uppercase tracking-wider">Venter refusjon · {fmtKr(info.refunded)} av {fmtKr(info.expected)} kr</span>
@@ -927,7 +972,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                 {coverExpenseCandidates.map(t => (
                                                     <button key={t.id} onClick={() => stageCoverAdd(t.id)} className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20">
                                                         <span className="min-w-0">
-                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{displayName(t)}</span>
                                                             <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{accountName(t.accountId) ? ` • ${accountName(t.accountId)}` : ''}{isCoveredExpense(t) ? (coverLinkIds(t).length ? ' • gjennomreise, delvis dekket' : ' • gjennomreise, venter innbetaling') : ''}</span>
                                                         </span>
                                                         <span className="font-semibold text-red-600 dark:text-red-400 whitespace-nowrap">-{fmtKr(t.amount)} kr</span>
@@ -1090,7 +1135,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                                                 {incomingCandidates.map(t => (
                                                                                     <button key={t.id} onClick={() => { const next = t.id === selectedIncomingId ? '' : t.id; setSelectedIncomingId(next); setAllocations(next ? [{ transactionId: currentTransaction.id, amount: String(Math.round(Math.min(outstandingRefund || t.amount, t.amount) * 100) / 100), complete: null }] : []); }} className={clsx("w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors", selectedIncomingId === t.id ? "bg-teal-100 dark:bg-teal-900/40" : "hover:bg-gray-50 dark:hover:bg-gray-700/50")}>
                                                                                         <span className="min-w-0">
-                                                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{displayName(t)}</span>
                                                                                             <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{accountName(t.accountId) ? ` • ${accountName(t.accountId)}` : ''}{isHandled(t) ? ` • ${t.category || 'kategorisert'}` : ' • uavstemt'}</span>
                                                                                         </span>
                                                                                         <span className="font-semibold text-green-600 dark:text-green-400 whitespace-nowrap">+{fmtKr(t.amount)} kr</span>
@@ -1148,7 +1193,7 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                                                 {coverIncomeCandidates.map(t => (
                                                                     <button key={t.id} onClick={() => stageCoverAdd(t.id)} className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-900/20">
                                                                         <span className="min-w-0">
-                                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</span>
+                                                                            <span className="block font-medium text-gray-900 dark:text-gray-100 truncate">{displayName(t)}</span>
                                                                             <span className="block text-xs text-gray-500 dark:text-gray-400">{t.date}{accountName(t.accountId) ? ` • ${accountName(t.accountId)}` : ''}{isCoveringIncome(t, allTransactions) ? ' • dekker allerede en annen overføring' : isHandled(t) ? ` • ${t.category || 'kategorisert'}` : ' • uavstemt'}</span>
                                                                         </span>
                                                                         <span className="font-semibold text-green-600 dark:text-green-400 whitespace-nowrap">+{fmtKr(t.amount)} kr</span>

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Edit2, Flame } from 'lucide-react';
 import ReconcileTransactionsModal from '../accounts/ReconcileTransactionsModal';
 import InfoTip from '../common/InfoTip';
+import { useBudget } from '../../contexts/BudgetContext';
 
 /**
  * «Unødvendige kjøp» — the transactions the companion app (or the reconcile
@@ -11,6 +12,7 @@ import InfoTip from '../common/InfoTip';
  * refunds of a flagged purchase left out so a returned item doesn't count.
  */
 export default function UnnecessaryPurchasesCard({ transactions, selectedMonth, prevMonth, formatMonth, accounts, leftToSpend }) {
+    const { displayName } = useBudget();
     const [editTransaction, setEditTransaction] = useState(null);
 
     const flagged = useMemo(() => {
@@ -63,7 +65,7 @@ export default function UnnecessaryPurchasesCard({ transactions, selectedMonth, 
                         {flagged.map(t => (
                             <div key={t.id} className="flex items-center justify-between py-1.5 text-sm group/row">
                                 <div className="min-w-0">
-                                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">{t.name}</div>
+                                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">{displayName(t)}</div>
                                     <div className="text-xs text-gray-500 dark:text-gray-400">
                                         {t.date}{accountName(t.accountId) ? ` · ${accountName(t.accountId)}` : ''}{t.comment ? ` · ${t.comment}` : ''}
                                     </div>

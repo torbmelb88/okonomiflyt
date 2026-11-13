@@ -6,6 +6,7 @@ import CategoryBudgetManager from './CategoryBudgetManager';
 import PartnerSettings from './PartnerSettings';
 import SalarySettings from './SalarySettings';
 import ResetTool from './ResetTool';
+import MerchantAliasSettings from './MerchantAliasSettings';
 import CreateBudgetModal from '../budget/CreateBudgetModal';
 
 const SectionHeading = ({ shared, children, hint }) => (
@@ -53,6 +54,7 @@ export default function Settings() {
             <SectionHeading hint="hele husholdningen">Kategorier og budsjettposter</SectionHeading>
             <MigrationTool />
             <CategoryBudgetManager />
+            <MerchantAliasSettings />
 
             <SectionHeading hint={personalBudget?.name}>Mitt budsjett</SectionHeading>
             {personalBudget
