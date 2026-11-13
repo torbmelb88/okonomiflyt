@@ -6,7 +6,7 @@ import TransactionReceipt from './TransactionReceipt';
 import InfoTip from '../common/InfoTip';
 import { findBudgetItemSuggestion } from '../../utils/textMatch';
 import { FOREIGN_CURRENCIES } from '../../utils/currency';
-import { reconcilesOnLink, isHandled } from '../../utils/reconciliation';
+import { reconcilesOnLink, isHandled, isSelfReported } from '../../utils/reconciliation';
 import { refundStatus, refundsOf, allocationsValid, allocationComplete, parseAmount } from '../../utils/refunds';
 import RefundAllocationEditor from './RefundAllocationEditor';
 import { isCoveredExpense, isCoveringIncome, coverGroupOf, coveringIncomesOf, expensesCoveredBy, coverLinkIds } from '../../utils/coverage';
@@ -576,6 +576,41 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
         }
     };
 
+    // A companion/MCP row the import (or a manual merge) linked to a bank row.
+    // Card purchases of the same amount on consecutive days are often paired
+    // with the wrong bank row — SB1 dates by booking day, not purchase day.
+    // Unlinking returns the row to «bokført, venter på banken» and frees the
+    // bank row, which the next «Hent fra bank» pairs again (oldest purchase
+    // first). Acts at once, like removing a refund link.
+    const bankLinkedSelfReport = !!(liveTx.externalId && isSelfReported({ source: liveTx.origin }));
+    const handleUnlinkBank = async () => {
+        const month = liveTx.month || dateMonth(liveTx.date);
+        if (!await confirm({
+            title: 'Koble fra banktransaksjonen?',
+            message: 'Raden blir companion-føringen alene igjen (bokført, venter på banken), og banktransaksjonen hentes på nytt ved neste «Hent fra bank». Skjer med en gang.'
+                + (isMonthReconciled(month) ? ` ${formatMonthLong(month)} er markert som avstemt — tallene der kan endre seg til banken er koblet igjen.` : ''),
+            confirmText: 'Koble fra',
+        })) return;
+        try {
+            await updateTransaction(liveTx.id, {
+                externalId: null,
+                source: liveTx.origin,
+                origin: null,
+                reconciled: false,
+                // A foreign purchase took over the bank's NOK amount on link
+                ...(liveTx.originalCurrency ? {
+                    amount: liveTx.originalAmount, currency: liveTx.originalCurrency,
+                    originalAmount: null, originalCurrency: null,
+                } : {}),
+            });
+            notify({ message: 'Koblet fra banken. Kjør «Hent fra bank» for å koble på nytt.' });
+            onClose();
+        } catch (error) {
+            console.error('Failed to unlink bank row', error);
+            notify({ message: 'Kunne ikke koble fra banken.', variant: 'error' });
+        }
+    };
+
     const handleAcceptAllSuggestions = async () => {
         if (remainingWithSuggestions.length === 0) return;
         setBulkSaving(true);
@@ -662,7 +697,13 @@ export default function ReconcileTransactionsModal({ isOpen, onClose, transactio
                                     {account && <span className="flex items-center gap-1"><CreditCard className="w-3 h-3" />{account.name}</span>}
                                     {currentTransaction.category && !isKindCategory(currentTransaction) && <span>· {currentTransaction.category}</span>}
                                     {liveTx.source === 'companion_app' && <span>· fra companion-appen</span>}
+                                    {bankLinkedSelfReport && <span>· {liveTx.origin === 'mcp' ? 'ført via Claude' : 'fra companion-appen'}, koblet til banken</span>}
                                 </p>
+                                {isEdit && bankLinkedSelfReport && (
+                                    <button onClick={handleUnlinkBank} className="mt-2 text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 underline underline-offset-2" title="Feil banktransaksjon? Kobler fra, så parer neste bankimport på nytt">
+                                        Koble fra banktransaksjonen
+                                    </button>
+                                )}
                             </div>
                             <div className="text-right flex-shrink-0">
                                 <span className={clsx("text-2xl font-bold", isIncome ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>

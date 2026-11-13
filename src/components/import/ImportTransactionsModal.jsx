@@ -29,6 +29,18 @@ const isUnbooked = (s) =>
     isRecentId(s.externalId) ||
     (s.bookingStatus ? s.bookingStatus !== 'BOOKED' : looksLikePlaceholder(s.name));
 
+// Among self-reported rows that could be this bank row (same account,
+// direction and amount, close date), pick the OLDEST purchase on or before the
+// bank date. SB1 dates card purchases by booking day, which trails the purchase:
+// three 118,9 purchases on 10., 11. and 12. Nov came as bank rows dated 11., 12.
+// and later — first-found paired them arbitrarily. Bank rows are walked oldest
+// first, so this pairs them in order. Rows dated after the bank date (clock
+// skew, manual date) are a fallback only.
+const oldestFit = (candidates, bankDate) => {
+    const byDate = [...candidates].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    return byDate.find(t => t.date <= bankDate) || byDate[0] || null;
+};
+
 const thisMonth = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`; };
 
 // Default «hent fra»: the 1st of the current month, unless the previous month
@@ -122,7 +134,10 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
         const twinClaimedIds = new Set();
         let alreadyImported = 0, noAccount = 0, noBudget = 0, beforeFrom = 0;
 
-        for (const s of staged) {
+        // Oldest bank rows first, so with several purchases of the same amount
+        // each booking claims the oldest still-unlinked purchase (see oldestFit).
+        const stagedByDate = [...staged].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        for (const s of stagedByDate) {
             if (s.date && s.date < fromDate) { beforeFrom++; continue; }
             // Skip unbooked rows: SB1 gives them a placeholder name ("Nettgiro")
             // and a DIFFERENT externalId once booked, so importing them now
@@ -149,7 +164,7 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
                     // BOOKING day, so repeat purchases of the same amount on
                     // consecutive days (three × 118,9 on 10.–12. Nov, all real)
                     // make a same-amount booked row no proof of a twin.
-                    const logged = !already && pacc && existing.find(t => !t.externalId && sameMoney(t));
+                    const logged = !already && pacc && oldestFit(existing.filter(t => !t.externalId && !matchClaimedIds.has(t.id) && sameMoney(t)), s.date);
                     const twin = !logged ? twinCandidate : null;
                     if (twin) twinClaimedIds.add(twin.id);
                     const note = already
@@ -186,14 +201,14 @@ export default function ImportTransactionsModal({ isOpen, onClose, onImported })
             // would be coincidence, so they are only linked manually via merge.
             // Direction must agree: an incoming 148 is never the logged 148
             // purchase, even on the same account and day.
-            const match = existing.find(t =>
+            const match = oldestFit(existing.filter(t =>
                 t.accountId === acc.id && !t.externalId &&
                 !matchClaimedIds.has(t.id) &&
                 (!t.currency || t.currency === 'NOK') &&
                 t.type === s.type &&
                 Math.abs((t.amount || 0) - (s.amount || 0)) < 0.01 &&
                 t.date && datesClose(t.date, s.date)
-            );
+            ), s.date);
             // A previously imported placeholder ("Nettgiro") or card reservation
             // (`recent:` id) that has now been booked under a new externalId:
             // fold the booked row into it instead of creating a twin.
