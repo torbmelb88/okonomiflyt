@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import BudgetItemDetailsModal from './BudgetItemDetailsModal';
 import BudgetItemHistoryModal from './BudgetItemHistoryModal';
+import BudgetAverageFillModal from './BudgetAverageFillModal';
 import BudgetToggle from '../common/BudgetToggle';
 import { isVirtualExpense, SCOPE_LABEL } from '../../utils/categoryMigration';
 import { computeSplit, readRoundingMode } from '../../utils/settlement';
@@ -38,7 +39,8 @@ function BudgetAmountInput({ value, onCommit, className }) {
  * The planned amount is per month only (monthlyBudgets) — there is no
  * standard amount on the item, so a figure typed into one month never leaks
  * into another. The calendar button next to the amount shows the last year's
- * actual spending on the item (and the average) to base the plan on. The
+ * actual spending on the item (and the average) to base the plan on; «Plan
+ * fra snitt» fills in that average for every item at once. The
  * per-budget instance (expense) is materialized lazily the first time an
  * amount is set or a transaction is linked. Items flagged «utenfor
  * statistikk» stay in the table (greyed) but out of the totals and the pie.
@@ -53,6 +55,7 @@ export default function Budget() {
 
     const [selectedBudgetItem, setSelectedBudgetItem] = useState(null);
     const [historyRow, setHistoryRow] = useState(null);
+    const [fillOpen, setFillOpen] = useState(false);
     const [pieMode, setPieMode] = useState('actual'); // 'plan' | 'actual'
     const [selectedMonth, setSelectedMonth] = useState(() => {
         const now = new Date();
@@ -159,6 +162,17 @@ export default function Budget() {
         }
     };
 
+    // «Plan fra snitt»: this month's planned amount for many rows at once.
+    // Every row here already has its instance (no instance, no history).
+    const applyAmounts = async (changes) => {
+        const results = await Promise.allSettled(changes.map(c => setMonthlyBudget(c.instId, selectedMonth, c.amount)));
+        const failed = results.filter(r => r.status === 'rejected');
+        if (failed.length > 0) {
+            console.error('Failed to set amounts', failed.map(f => f.reason));
+            notify({ message: `Kunne ikke lagre ${failed.length} av ${changes.length} beløp: ${failed[0].reason?.message}`, variant: 'error' });
+        }
+    };
+
     const diffCls = (d) => d < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400';
 
     return (
@@ -169,6 +183,11 @@ export default function Budget() {
                     <BudgetToggle />
                 </div>
                 <div className="flex gap-2">
+                    <button onClick={() => setFillOpen(true)}
+                        className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm"
+                        title={`Fyll planen for ${formatMonth(selectedMonth)} med snittforbruket per budsjettpost`}>
+                        <CalendarDays className="w-4 h-4" /><span>Plan fra snitt</span>
+                    </button>
                     <Link to="/transaksjoner" className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium shadow-sm text-sm">
                         <List className="w-4 h-4" /><span className="hidden sm:inline">Til transaksjoner</span>
                     </Link>
@@ -196,7 +215,7 @@ export default function Budget() {
                                 <div className={clsx('font-bold text-lg', item.cls)}>{item.text}</div>
                             </div>
                         ))}
-                        <InfoTip text="Plan legges inn måned for måned — et beløp gjelder bare måneden du står i. Kalenderknappen ved beløpet viser hva posten faktisk har kostet de siste 12 månedene, med gjennomsnitt. Budsjettposter opprettes i Innstillinger. Samme rader og samme filter for alle tre tallene: poster merket «utenfor statistikk» (Innstillinger) står i tabellen, men telles ikke. Brukt = transaksjoner knyttet til postene, refusjoner trukket fra; uavstemte transaksjoner er ikke med før de er avstemt. På et privat budsjett er «Min andel felles» din andel av fellesutgiftene denne måneden, samme tall som Oppgjør." />
+                        <InfoTip text="Plan legges inn måned for måned — et beløp gjelder bare måneden du står i. Kalenderknappen ved beløpet viser hva posten faktisk har kostet de siste 12 månedene, med gjennomsnitt. «Plan fra snitt» øverst fyller inn det gjennomsnittet for alle postene på én gang. Budsjettposter opprettes i Innstillinger. Samme rader og samme filter for alle tre tallene: poster merket «utenfor statistikk» (Innstillinger) står i tabellen, men telles ikke. Brukt = transaksjoner knyttet til postene, refusjoner trukket fra; uavstemte transaksjoner er ikke med før de er avstemt. På et privat budsjett er «Min andel felles» din andel av fellesutgiftene denne måneden, samme tall som Oppgjør." />
                     </div>
                     <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors ml-2">
                         <ArrowRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -299,6 +318,7 @@ export default function Budget() {
             </div>
 
             <BudgetItemHistoryModal isOpen={!!historyRow} onClose={() => setHistoryRow(null)} row={historyRow} selectedMonth={selectedMonth} onUse={(amt) => commitAmount(historyRow, amt)} />
+            {fillOpen && <BudgetAverageFillModal rows={rows} selectedMonth={selectedMonth} onApply={applyAmounts} onClose={() => setFillOpen(false)} />}
             <BudgetItemDetailsModal isOpen={!!selectedBudgetItem} onClose={() => setSelectedBudgetItem(null)} budgetItem={selectedBudgetItem} selectedMonth={selectedMonth} />
         </div>
     );

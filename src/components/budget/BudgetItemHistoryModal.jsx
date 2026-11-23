@@ -1,19 +1,9 @@
 import { X, CalendarDays } from 'lucide-react';
 import { useBudget } from '../../contexts/BudgetContext';
+import { itemHistory, toPlanAmount } from '../../utils/budgetHistory';
 import clsx from 'clsx';
 
 const fmt = (n) => Math.round(n).toLocaleString('no-NO');
-
-/** The `n` months before `month` (YYYY-MM), oldest first. */
-function monthsBefore(month, n) {
-    const [y, m] = month.split('-').map(Number);
-    const out = [];
-    for (let i = n; i >= 1; i--) {
-        const d = new Date(y, m - 1 - i, 1);
-        out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-    return out;
-}
 
 const monthLabel = (month) => {
     const [y, m] = month.split('-').map(Number);
@@ -22,31 +12,20 @@ const monthLabel = (month) => {
 
 /**
  * What was actually spent on one budget item, month by month for the year
- * before the selected month, with the average over the reconciled months.
- * Reconciled months count even at 0 (a seasonal post like bompenger is
- * really 0 most months); unreconciled months are left out, since their
- * numbers aren't final or the history doesn't exist yet. «Bruk» copies a month's actual (or the average) into the plan for
- * the selected month — the way to base a plan on history.
+ * before the selected month, with the average over the reconciled months
+ * (see itemHistory for what counts). «Bruk» copies a month's actual (or the
+ * average) into the plan for the selected month — the way to base a plan on
+ * history. BudgetAverageFillModal does the same for every item at once.
  */
 export default function BudgetItemHistoryModal({ isOpen, onClose, row, selectedMonth, onUse }) {
     const { transactions, isMonthReconciled } = useBudget();
     if (!isOpen || !row) return null;
 
     const linked = transactions.filter(t => t.budgetItemId === row.instId);
-    const perMonth = monthsBefore(selectedMonth, 12).map(month => {
-        const txs = linked.filter(t => t.month === month);
-        return {
-            month,
-            count: txs.length,
-            reconciled: isMonthReconciled(month),
-            actual: txs.reduce((sum, t) => (t.type === 'income' ? sum - t.amount : sum + t.amount), 0),
-        };
-    });
-    const inAverage = perMonth.filter(r => r.reconciled);
-    const average = inAverage.length ? inAverage.reduce((s, r) => s + r.actual, 0) / inAverage.length : 0;
+    const { perMonth, reconciledCount, average } = itemHistory(linked, selectedMonth, isMonthReconciled);
     const maxActual = Math.max(1, ...perMonth.map(r => r.actual));
 
-    const use = (amount) => { onUse(Math.max(0, Math.round(amount))); onClose(); };
+    const use = (amount) => { onUse(toPlanAmount(amount)); onClose(); };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -88,11 +67,11 @@ export default function BudgetItemHistoryModal({ isOpen, onClose, row, selectedM
                     <div className="flex-1">
                         <div className="text-sm font-bold text-gray-900 dark:text-gray-100">Gjennomsnitt</div>
                         <div className="text-[11px] text-gray-400">
-                            {inAverage.length > 0 ? `over ${inAverage.length} avstemte ${inAverage.length === 1 ? 'måned' : 'måneder'}` : 'ingen avstemte måneder i perioden'}
+                            {reconciledCount > 0 ? `over ${reconciledCount} avstemte ${reconciledCount === 1 ? 'måned' : 'måneder'}` : 'ingen avstemte måneder i perioden'}
                         </div>
                     </div>
                     <div className="w-24 text-right text-base font-bold text-gray-900 dark:text-gray-100 tabular-nums">{fmt(average)} kr</div>
-                    <button onClick={() => use(average)} disabled={inAverage.length === 0}
+                    <button onClick={() => use(average)} disabled={reconciledCount === 0}
                         className="text-xs font-bold px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 transition-colors"
                         title={`Sett planen for ${monthLabel(selectedMonth)} til gjennomsnittet`}>
                         Bruk
