@@ -6,6 +6,7 @@ import { fxPlausible } from '../../utils/currency';
 import { isSelfReported } from '../../utils/reconciliation';
 import { monthAfterRedate, formatMonthLong, addMonths, dateMonth } from '../../utils/countedMonth';
 import { datesClose } from '../../utils/transferPairs';
+import { isProvisionalBankId } from '../../utils/bankId';
 
 // Unbooked bill payments have no counterparty yet — SB1 names them by type
 // only. These labels mark a transaction as a placeholder awaiting booking.
@@ -23,7 +24,8 @@ const PLACEHOLDER_ID_SUFFIX = ':000000000000000000';
 // a `recent:<hash>` nonUniqueId that is REPLACED by a real one on booking
 // (seen 2026-09-09: six purchases re-ided overnight). Importing them early
 // therefore guarantees a twin later — they wait for booking like Nettgiro.
-const isRecentId = (id) => typeof id === 'string' && id.includes(':recent:');
+// Since ~2026-11-20 the bank's own provisional ids are UUIDs (utils/bankId).
+const isRecentId = isProvisionalBankId;
 const isUnbooked = (s) =>
     (typeof s.externalId === 'string' && s.externalId.endsWith(PLACEHOLDER_ID_SUFFIX)) ||
     isRecentId(s.externalId) ||

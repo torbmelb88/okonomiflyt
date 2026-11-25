@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { isSelfReported, reconcilesOnLink } from '../utils/reconciliation';
 import { coverLinkIds, isCoveredExpense } from '../utils/coverage';
 import { makeDisplayName, aliasKey } from '../utils/merchantName';
+import { isProvisionalBankId } from '../utils/bankId';
 
 const BudgetContext = createContext();
 
@@ -440,11 +441,12 @@ export function BudgetProvider({ children }) {
             // the bank-side identity (externalId/source) even when the kept
             // copy is the self-reported one — the next import then recognizes
             // it, and the row no longer counts as awaiting a bank match.
-            // A card reservation's `recent:` id is replaced by the bank on
-            // booking, so a booked id always wins — otherwise the next import
-            // would recreate the booked twin that was just merged away.
+            // A card reservation's provisional id (`recent:` or UUID) is
+            // replaced by the bank on booking, so a booked id always wins —
+            // otherwise the next import would recreate the booked twin that
+            // was just merged away.
             externalId: [keep.externalId, remove.externalId].filter(Boolean)
-                .sort((a, b) => (String(a).includes(':recent:') ? 1 : 0) - (String(b).includes(':recent:') ? 1 : 0))[0] ?? null,
+                .sort((a, b) => (isProvisionalBankId(a) ? 1 : 0) - (isProvisionalBankId(b) ? 1 : 0))[0] ?? null,
             source: (isSelfReported(keep) && !isSelfReported(remove) ? remove.source : keep.source) ?? null,
             // Remember the self-reported side (see ImportTransactionsModal):
             // if the bank re-ids the row later, it keeps its own name/date.
